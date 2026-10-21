@@ -1,0 +1,59 @@
+[gd_resource type="Resource" script_class="StealthTuning" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/stealth_tuning.gd" id="1_tuning"]
+
+[resource]
+script = ExtResource("1_tuning")
+sight_range = 12.0
+sight_fov_degrees = 110.0
+base_sight_gain = 20.0
+stance_multipliers = {
+0: 0.4,
+1: 1.0,
+2: 1.5,
+3: 0.0
+}
+activity_multipliers = {
+0: 1.0,
+1: 2.5,
+2: 2.0
+}
+crowd_multiplier = 0.5
+crowd_minimum = 2
+crowd_radius = 3.0
+low_sanity_threshold = 25.0
+low_sanity_multiplier = 1.5
+unseen_decay = 3.0
+hidden_decay = 25.0
+notice_threshold = 35.0
+hearing_radius = {
+0: 1.0,
+1: 3.0,
+2: 8.0,
+3: 0.0
+}
+flash_spike = 40.0
+carrying_seen_spike = 30.0
+startle_distance = 1.2
+startle_spike = 25.0
+teacher_sight_range = 14.0
+teacher_fov_degrees = 100.0
+alert_rates = {
+&"out_of_class": 8.0,
+&"running_in_hall": 4.0,
+&"camera_at_student": 10.0,
+&"carrying_stolen_item": 10.0
+}
+alert_spikes = {
+&"late": 10.0,
+&"skipped_class": 25.0,
+&"student_witness": 5.0
+}
+sanity_drain_delay = 30.0
+sanity_drain_rate = 0.5
+sanity_recover_rate = 3.0
+sanity_watch_range = 15.0
+sanity_photo_bonus = 10.0
+vignette_sanity_threshold = 40.0
+no_hide_sanity_threshold = 10.0
+sneak_speed_low_sanity_multiplier = 0.75
