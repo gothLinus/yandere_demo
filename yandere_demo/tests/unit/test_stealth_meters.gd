@@ -62,13 +62,19 @@ func test_noticed_fires_on_upward_crossing_and_rearms_below_hysteresis() -> void
 	meters.add_suspicion_spike(40.0)
 	assert_eq(noticed_count[0], 2)
 
-func test_noticed_stays_latched_between_threshold_and_hysteresis() -> void:
+func test_noticed_stays_latched_inside_hysteresis_band_and_rearms_below_it() -> void:
 	var noticed_count: Array[int] = [0]
 	meters.noticed.connect(func() -> void: noticed_count[0] += 1)
 	meters.add_suspicion_spike(40.0)
-	meters.apply_unseen(1.0, false)
+	meters.apply_unseen(0.5, true)
+	assert_near(meters.suspicion, 27.5, 0.001)
 	meters.add_suspicion_spike(1.0)
 	assert_eq(noticed_count[0], 1)
+	assert_true(meters.is_noticed())
+	meters.apply_unseen(0.2, true)
+	assert_true(not meters.is_noticed())
+	meters.add_suspicion_spike(15.0)
+	assert_eq(noticed_count[0], 2)
 
 func test_reset_clears_values_and_rearms_signals() -> void:
 	var noticed_count: Array[int] = [0]

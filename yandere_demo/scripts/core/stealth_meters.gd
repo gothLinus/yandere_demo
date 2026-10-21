@@ -47,8 +47,8 @@ func apply_unseen(delta: float, is_hidden: bool) -> void:
 
 
 func add_suspicion_spike(amount: float) -> void:
-	suspicion_triggered.emit(amount)
 	_set_suspicion(suspicion + amount)
+	suspicion_triggered.emit(amount)
 
 
 func add_alert_rate(delta: float, reason: StringName) -> void:
@@ -92,8 +92,9 @@ func reset() -> void:
 
 func _set_suspicion(value: float) -> void:
 	var clamped: float = clampf(value, 0.0, METER_MAXIMUM)
-	if not is_equal_approx(clamped, suspicion):
-		suspicion = clamped
+	var has_changed: bool = clamped != suspicion
+	suspicion = clamped
+	if has_changed:
 		suspicion_changed.emit(suspicion)
 	_update_notice()
 	if suspicion >= METER_MAXIMUM:
@@ -102,8 +103,9 @@ func _set_suspicion(value: float) -> void:
 
 func _set_school_alert(value: float) -> void:
 	var clamped: float = clampf(value, 0.0, METER_MAXIMUM)
-	if not is_equal_approx(clamped, school_alert):
-		school_alert = clamped
+	var has_changed: bool = clamped != school_alert
+	school_alert = clamped
+	if has_changed:
 		school_alert_changed.emit(school_alert)
 	if school_alert >= METER_MAXIMUM:
 		_report_caught(&"school_alert")
@@ -111,8 +113,9 @@ func _set_school_alert(value: float) -> void:
 
 func _set_sanity(value: float) -> void:
 	var clamped: float = clampf(value, 0.0, METER_MAXIMUM)
-	if not is_equal_approx(clamped, sanity):
-		sanity = clamped
+	var has_changed: bool = clamped != sanity
+	sanity = clamped
+	if has_changed:
 		sanity_changed.emit(sanity)
 
 
