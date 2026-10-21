@@ -2,3 +2,4 @@
 yandere_demo/.godot/
 *.blend1
 .superpowers/
+__pycache__/
