@@ -18,6 +18,7 @@ from lib.rig import BRAID_BONES, HUMANOID_BONES, SKIRT_BONES  # noqa: E402
 from lib.validate import validate_character  # noqa: E402
 
 FACE_SHAPE_KEYS = ["neutral", "startled", "suspicious", "happy", "blink"]
+TARGET_MESHES = ["Body", "Head", "Face", "Hair", "Braid", "Bows", "Uniform"]
 
 CHECKS = {
     "target": {
@@ -26,6 +27,7 @@ CHECKS = {
         "shape_keys": FACE_SHAPE_KEYS,
         "actions": [],
         "bones": HUMANOID_BONES + BRAID_BONES + SKIRT_BONES,
+        "meshes": TARGET_MESHES,
     },
 }
 
@@ -43,7 +45,7 @@ def run_check(check_name: str) -> list[str]:
     if not os.path.exists(blend_path):
         return [f"{check['blend']} does not exist"]
     bpy.ops.wm.open_mainfile(filepath=blend_path)
-    return validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"])
+    return validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"], check["meshes"])
 
 
 def main() -> int:
@@ -61,5 +63,8 @@ def main() -> int:
     return 1 if failed else 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+# blender-mcp's exec(source, {"__file__": path}) leaves __name__ as "builtins".
+if __name__ in ("__main__", "builtins"):
+    exit_code = main()
+    if bpy.app.background:
+        sys.exit(exit_code)

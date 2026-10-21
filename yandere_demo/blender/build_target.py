@@ -1,7 +1,7 @@
 """Build the target character, save blender/target.blend and export assets/models/target.glb.
 
 CLI:  Blender --background --factory-startup --python yandere_demo/blender/build_target.py
-MCP:  exec(open(path).read(), {"__file__": path, "__name__": "__main__"})
+MCP:  exec(open(path).read(), {"__file__": path})
 """
 
 import importlib
@@ -39,7 +39,9 @@ TARGET_PARAMS = body.CharacterParams(
 
 
 def reset_scene() -> None:
-    if bpy.context.object and bpy.context.object.mode != "OBJECT":
+    # Right after open_mainfile in the same MCP call the context has no `object`; the view layer always does.
+    active = bpy.context.view_layer.objects.active
+    if active is not None and active.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
     for collection in (bpy.data.objects, bpy.data.meshes, bpy.data.armatures, bpy.data.materials,
                        bpy.data.images, bpy.data.actions, bpy.data.curves, bpy.data.cameras, bpy.data.lights):
@@ -75,5 +77,6 @@ def main() -> None:
     print(f"built {armature.name}: {BLEND_PATH}, {GLB_PATH}")
 
 
-if __name__ == "__main__":
+# blender-mcp's exec(source, {"__file__": path}) leaves __name__ as "builtins".
+if __name__ in ("__main__", "builtins"):
     main()

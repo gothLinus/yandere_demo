@@ -1,6 +1,7 @@
 """Uniforms fitted to a generated body: sailor top and collar, neckerchief, pleated skirt, shoes, proxy."""
 
 import math
+from dataclasses import dataclass
 
 import bpy
 import bmesh
@@ -12,49 +13,85 @@ from .materials import principled
 from .rig import SKIRT_BONES, SKIRT_SIDES, add_skirt_chains, bone_world_points
 
 UNIFORM_COLORS = {
-    "sailor_red": {"main": "#f7f5f8", "accent": "#c9505c", "neckerchief": "#f39fae", "trim": "#fbfbfc"},
-    "sailor_navy": {"main": "#f4f4f6", "accent": "#26304f", "neckerchief": "#b8243a", "trim": "#fbfbfc"},
+    "sailor_red": {"main": "#f7f5f8", "accent": "#c9505c", "accent_material": "M_UniformRed", "neckerchief": "#f39fae"},
+    "sailor_navy": {"main": "#f4f4f6", "accent": "#26304f", "accent_material": "M_UniformNavy", "neckerchief": "#b8243a"},
 }
 
-WAIST_Z = 0.995
-HEM_Z = 0.505
-TOP_HEM_Z = 0.915
-TOP_CUT_Z = 1.07
+REFERENCE_HEIGHT = 1.58
 SLEEVE_FRACTION = 0.52
 PLEAT_COUNT = 24
 LOWER_BODY_BONES = {"hips", "spine", "thigh.L", "thigh.R", "shin.L", "shin.R"}
 
 WHITE = 0
-RED = 1
+ACCENT = 1
 NECKERCHIEF = 2
 SHOE = 3
 SOLE = 4
 
 
+def _uniform_colors(uniform: str) -> dict:
+    if uniform == "suit":
+        raise NotImplementedError("the suit uniform is implemented for the teacher in Task 10")
+    if uniform not in UNIFORM_COLORS:
+        raise ValueError(f"unknown uniform {uniform!r}; supported: {sorted(UNIFORM_COLORS)} and 'suit' (Task 10)")
+    return UNIFORM_COLORS[uniform]
+
+
 def _uniform_materials(params) -> list:
-    colors = UNIFORM_COLORS.get(params.uniform, UNIFORM_COLORS["sailor_red"])
+    colors = _uniform_colors(params.uniform)
     return [
         principled("M_UniformWhite", colors["main"], 0.7),
-        principled("M_UniformRed", colors["accent"], 0.65),
+        principled(colors["accent_material"], colors["accent"], 0.65),
         principled("M_Neckerchief", colors["neckerchief"], 0.6),
         principled("M_Shoe", "#6b4332", 0.4),
         principled("M_ShoeSole", "#3a2620", 0.6),
     ]
 
 
+@dataclass(frozen=True)
+class UniformLevels:
+    """Garment heights derived from the rig, so one uniform fits any character height."""
+
+    waist_z: float
+    hem_z: float
+    top_hem_z: float
+    top_cut_z: float
+    scale: float
+
+    @classmethod
+    def from_armature(cls, armature) -> "UniformLevels":
+        hips_head, _ = bone_world_points(armature, "hips")
+        spine_head, _ = bone_world_points(armature, "spine")
+        _, knee = bone_world_points(armature, "thigh.L")
+        _, head_top = bone_world_points(armature, "head")
+        scale = head_top.z / REFERENCE_HEIGHT
+        return cls(
+            waist_z=spine_head.z - 0.015 * scale,
+            hem_z=knee.z + 0.036 * scale,
+            top_hem_z=hips_head.z - 0.016 * scale,
+            top_cut_z=spine_head.z + 0.060 * scale,
+            scale=scale,
+        )
+
+    def skirt_fraction(self, z: float) -> float:
+        return (self.waist_z - z) / (self.waist_z - self.hem_z)
+
+
 def add_skirt_bones(armature, params) -> list:
-    return add_skirt_chains(armature, WAIST_Z, HEM_Z, 0.11, 0.09)
+    levels = UniformLevels.from_armature(armature)
+    return add_skirt_chains(armature, levels.waist_z, levels.hem_z, 0.11 * levels.scale, 0.09 * levels.scale)
 
 
 class SkirtShape:
     """Radial skirt profile, fitted around the body's hips so no vertex pokes through."""
 
-    def __init__(self, body):
+    def __init__(self, body, levels: UniformLevels):
+        self.levels = levels
         self.bands = {}
         names = {group.index: group.name for group in body.vertex_groups}
         for vertex in body.data.vertices:
             point = body.matrix_world @ vertex.co
-            if point.z < HEM_Z - 0.05 or point.z > WAIST_Z + 0.05:
+            if point.z < levels.hem_z - 0.05 or point.z > levels.waist_z + 0.05:
                 continue
             dominant = max(vertex.groups, key=lambda element: element.weight, default=None)
             if dominant is None or names[dominant.group] not in LOWER_BODY_BONES:
@@ -75,28 +112,28 @@ class SkirtShape:
         return extent
 
     def radius(self, angle: float, z: float) -> float:
-        fraction = (WAIST_Z - z) / (WAIST_Z - HEM_Z)
-        flare = max(0.0, fraction) ** 0.85
-        radius_x = 0.090 + 0.125 * flare
-        radius_y = 0.074 + 0.105 * flare
+        flare = max(0.0, self.levels.skirt_fraction(z)) ** 0.85
+        radius_x = (0.090 + 0.125 * flare) * self.levels.scale
+        radius_y = (0.074 + 0.105 * flare) * self.levels.scale
         profile = (radius_x * radius_y) / math.hypot(radius_y * math.cos(angle), radius_x * math.sin(angle))
-        return max(profile, self.body_extent(angle, z) + 0.016)
+        return max(profile, self.body_extent(angle, z) + 0.016 * self.levels.scale)
 
 
 def build_skirt(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
-    stripe_bands = [(0.032, 0.040), (0.050, 0.058)]
-    heights = [WAIST_Z - (WAIST_Z - HEM_Z - 0.07) * index / 9 for index in range(10)]
+    levels = shape.levels
+    scale = levels.scale
+    stripe_bands = [(0.032 * scale, 0.040 * scale), (0.050 * scale, 0.058 * scale)]
+    heights = [levels.waist_z - (levels.waist_z - levels.hem_z - 0.07 * scale) * index / 9 for index in range(10)]
     for low, high in stripe_bands:
-        heights += [HEM_Z + high, HEM_Z + low]
-    heights += [HEM_Z + 0.022, HEM_Z + 0.011, HEM_Z]
+        heights += [levels.hem_z + high, levels.hem_z + low]
+    heights += [levels.hem_z + 0.022 * scale, levels.hem_z + 0.011 * scale, levels.hem_z]
     heights = sorted(set(round(height, 4) for height in heights), reverse=True)
 
     samples_per_pleat = 4
     count = PLEAT_COUNT * samples_per_pleat
     rings = []
     for z in heights:
-        fraction = (WAIST_Z - z) / (WAIST_Z - HEM_Z)
-        amplitude = 0.002 + 0.010 * fraction
+        amplitude = (0.002 + 0.010 * levels.skirt_fraction(z)) * scale
         ring = []
         for index in range(count):
             angle = 2 * math.pi * index / count
@@ -108,9 +145,9 @@ def build_skirt(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
     vertices, faces = mesh_utils.loft(rings)
     material_indices = []
     for ring_index in range(len(rings) - 1):
-        middle = (heights[ring_index] + heights[ring_index + 1]) * 0.5 - HEM_Z
+        middle = (heights[ring_index] + heights[ring_index + 1]) * 0.5 - levels.hem_z
         is_stripe = any(low < middle < high for low, high in stripe_bands)
-        material_indices += [WHITE if is_stripe else RED] * count
+        material_indices += [WHITE if is_stripe else ACCENT] * count
     skirt = mesh_utils.mesh_from_geometry(f"{params.prefix}Skirt", vertices, faces, _uniform_materials(params), material_indices)
     fold_edges = []
     for edge in skirt.data.edges:
@@ -122,18 +159,18 @@ def build_skirt(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
     _ensure_outward(skirt, Vector((0, 0.004, 0)))
     mesh_utils.add_modifier(skirt, "SOLIDIFY", thickness=0.003, offset=-1.0, use_even_offset=True)
     mesh_utils.apply_modifiers(skirt)
-    _skirt_weights(skirt, armature)
+    _skirt_weights(skirt, armature, levels)
     return skirt
 
 
-def _skirt_weights(skirt, armature) -> None:
+def _skirt_weights(skirt, armature, levels: UniformLevels) -> None:
     directions = {"front": -math.pi / 2, "back": math.pi / 2, "left": 0.0, "right": math.pi}
     skirt.vertex_groups.clear()
     groups = {name: skirt.vertex_groups.new(name=name) for name in ["hips", "thigh.L", "thigh.R"] + SKIRT_BONES}
     for vertex in skirt.data.vertices:
         point = vertex.co
         angle = math.atan2(point.y - 0.004, point.x)
-        fraction = max(0.0, min(1.0, (WAIST_Z - point.z) / (WAIST_Z - HEM_Z)))
+        fraction = max(0.0, min(1.0, levels.skirt_fraction(point.z)))
         hips_weight = max(0.0, 1.0 - fraction * 3.0)
         upper = max(0.0, 1.0 - abs(fraction - 0.4) / 0.4) if fraction < 0.8 else 0.0
         lower = max(0.0, (fraction - 0.4) / 0.6)
@@ -198,7 +235,7 @@ def build_top(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
             return along(point, bone) > SLEEVE_FRACTION
         if bone in ("hips", "spine", "chest") or bone.startswith("shoulder"):
             front_neckline = point.y < -0.02 and abs(point.x) < 0.055 and point.z > neck_cut - 0.03
-            return point.z < TOP_CUT_Z or point.z > neck_cut or front_neckline
+            return point.z < shape.levels.top_cut_z or point.z > neck_cut or front_neckline
         return True
 
     mesh_utils.remove_vertices(top, discard)
@@ -221,6 +258,11 @@ def build_top(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
             continue
         vertex.co += vertex.normal * 0.008
     _extrude_hem(bm, shape)
+    # bmesh element order after delete and extrude varies between runs; a canonical order keeps exports stable.
+    bm.faces.index_update()
+    ranked = sorted(bm.faces, key=lambda face: tuple(round(value, 5) for value in face.calc_center_median()))
+    rank_by_index = {face.index: rank for rank, face in enumerate(ranked)}
+    bm.faces.sort(key=lambda face: rank_by_index[face.index])
     bm.to_mesh(top.data)
     bm.free()
     top.data.update()
@@ -231,27 +273,35 @@ def build_top(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
 
 def _extrude_hem(bm, shape: SkirtShape) -> None:
     """Extend the torso's lower cut into clean horizontal rings that drape over the skirt waistband."""
-    hem_edges = [edge for edge in bm.edges if edge.is_boundary and all(vertex.co.z < TOP_CUT_Z + 0.04 for vertex in edge.verts)]
+    levels = shape.levels
+    hem_edges = [edge for edge in bm.edges
+                 if edge.is_boundary and all(vertex.co.z < levels.top_cut_z + 0.04 * levels.scale for vertex in edge.verts)]
     loop = {vertex for edge in hem_edges for vertex in edge.verts}
     radii = {}
     for vertex in loop:
         radii[vertex] = (math.atan2(vertex.co.y - 0.004, vertex.co.x), math.hypot(vertex.co.x, vertex.co.y - 0.004))
-    levels = [TOP_CUT_Z - 0.025, WAIST_Z, (WAIST_Z + TOP_HEM_Z) * 0.5, TOP_HEM_Z]
+    ring_heights = [levels.top_cut_z - 0.025 * levels.scale, levels.waist_z,
+                    (levels.waist_z + levels.top_hem_z) * 0.5, levels.top_hem_z]
     edges = hem_edges
-    for z in levels:
+    for z in ring_heights:
         result = bmesh.ops.extrude_edge_only(bm, edges=edges)
         new_vertices = [element for element in result["geom"] if isinstance(element, bmesh.types.BMVert)]
         edges = [element for element in result["geom"] if isinstance(element, bmesh.types.BMEdge)
                  and all(vertex in new_vertices for vertex in element.verts)]
-        loosen = 1.0 + 0.16 * (TOP_CUT_Z - z) / (TOP_CUT_Z - TOP_HEM_Z)
+        loosen = 1.0 + 0.16 * (levels.top_cut_z - z) / (levels.top_cut_z - levels.top_hem_z)
         sources = {vertex: next(edge.other_vert(vertex) for edge in vertex.link_edges if edge.other_vert(vertex) in radii)
                    for vertex in new_vertices}
         for vertex in new_vertices:
             angle, base_radius = radii[sources[vertex]]
-            radius = max(base_radius * loosen, shape.radius(angle, z) + 0.018)
+            radius = max(base_radius * loosen, shape.radius(angle, z) + 0.018 * levels.scale)
             vertex.co = Vector((math.cos(angle) * radius, math.sin(angle) * radius + 0.004, z))
             radii[vertex] = (angle, base_radius)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    # recalc_face_normals is not reliable on an open shell (it can flip the whole top between runs);
+    # orient each face away from the body's core instead.
+    for face in bm.faces:
+        center = face.calc_center_median()
+        if face.normal.dot(_outward_from_core(center)) < 0:
+            face.normal_flip()
 
 
 def _smooth_vertices(mesh_object, iterations: int) -> None:
@@ -280,7 +330,7 @@ def _sleeve_rings(top, armature) -> list:
 
 
 def build_cuffs(top, params, armature) -> list:
-    bands = [(0.0, 0.28, RED), (0.28, 0.40, WHITE), (0.40, 0.56, RED), (0.56, 0.68, WHITE), (0.68, 1.0, RED)]
+    bands = [(0.0, 0.28, ACCENT), (0.28, 0.40, WHITE), (0.40, 0.56, ACCENT), (0.56, 0.68, WHITE), (0.68, 1.0, ACCENT)]
     cuff_width = 0.030
     parts = []
     for center, axis, radius, side in _sleeve_rings(top, armature):
@@ -305,21 +355,12 @@ def build_cuffs(top, params, armature) -> list:
         for face, material in zip(faces, material_indices):
             parts.append(([vertices[index] for index in face], [(0, 1, 2, 3)], material))
     vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
+    vertices, faces, material_indices = mesh_utils.weld_geometry(vertices, faces, material_indices)
     cuffs = mesh_utils.mesh_from_geometry(f"{params.prefix}Cuffs", vertices, faces, _uniform_materials(params), material_indices)
-    _weld(cuffs)
     _ensure_outward_from_points(cuffs, [ring[0] for ring in _sleeve_rings(top, armature)])
     mesh_utils.add_modifier(cuffs, "SOLIDIFY", thickness=0.003, offset=0.0)
     mesh_utils.apply_modifiers(cuffs)
     return cuffs
-
-
-def _weld(mesh_object) -> None:
-    bm = bmesh.new()
-    bm.from_mesh(mesh_object.data)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
-    bm.to_mesh(mesh_object.data)
-    bm.free()
-    mesh_object.data.update()
 
 
 def _ensure_outward_from_points(mesh_object, centers: list) -> None:
@@ -334,6 +375,11 @@ def _ensure_outward_from_points(mesh_object, centers: list) -> None:
     mesh_object.data.update()
 
 
+def _outward_from_core(point: Vector) -> Vector:
+    """Direction from a vertical core line (lowered a little, so shoulder tops count as outward) to `point`."""
+    return point - Vector((0.0, 0.004, point.z - 0.1))
+
+
 class _Surface:
     def __init__(self, mesh_object):
         bm = bmesh.new()
@@ -343,10 +389,15 @@ class _Surface:
         bm.free()
 
     def place(self, point: Vector, offset: float) -> tuple:
-        location, normal, _, _ = self.tree.find_nearest(point)
+        location, normal, _, distance = self.tree.find_nearest(point)
         if location is None:
             return point, Vector((0, -1, 0))
-        if normal.dot(point - location) < 0 and (point - location).length > 0.02:
+        # The BVH build is threaded, so equidistant faces (the mirror seam) can win in either order between
+        # runs. Re-query the near band and break ties by position to keep exports reproducible.
+        candidates = self.tree.find_nearest_range(point, distance + 1e-6)
+        if candidates:
+            location, normal, _, _ = min(candidates, key=lambda hit: (round(hit[3], 6), tuple(round(value, 6) for value in hit[0])))
+        if normal.dot(_outward_from_core(location)) < 0:
             normal = -normal
         return location + normal * offset, normal
 
@@ -396,7 +447,7 @@ def build_collar(top, params, armature) -> bpy.types.Object:
     inner = inner_right + [point * mirror for point in reversed(inner_right[:-1])]
     outer = outer_right + [point * mirror for point in reversed(outer_right[:-1])]
     row_edges = [0.0, 0.22, 0.45, 0.64, 0.70, 0.78, 0.84, 0.92, 1.0]
-    row_materials = [RED, RED, RED, WHITE, RED, WHITE, RED, RED]
+    row_materials = [ACCENT, ACCENT, ACCENT, WHITE, ACCENT, WHITE, ACCENT, ACCENT]
     vertices = []
     for row in row_edges:
         for inner_point, outer_point in zip(inner, outer):
@@ -412,8 +463,8 @@ def build_collar(top, params, armature) -> bpy.types.Object:
             first = row * columns + column
             faces.append((first, first + 1, first + columns + 1, first + columns))
             material_indices.append(row_materials[row])
+    vertices, faces, material_indices = mesh_utils.weld_geometry(vertices, faces, material_indices)
     collar = mesh_utils.mesh_from_geometry(f"{params.prefix}Collar", vertices, faces, _uniform_materials(params), material_indices)
-    _weld(collar)
     _orient_away_from_body(collar, armature)
     mesh_utils.add_modifier(collar, "SOLIDIFY", thickness=0.0025, offset=1.0)
     mesh_utils.apply_modifiers(collar)
@@ -541,8 +592,8 @@ def build_shoes(body, params, armature) -> bpy.types.Object:
         for face, material in zip(faces, material_indices):
             parts.append(([vertices[index] for index in face], [tuple(range(len(face)))], material))
     vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
+    vertices, faces, material_indices = mesh_utils.weld_geometry(vertices, faces, material_indices)
     shoes = mesh_utils.mesh_from_geometry(f"{params.prefix}Shoes", vertices, faces, _uniform_materials(params), material_indices)
-    _weld(shoes)
     mesh_utils.recalculate_normals(shoes)
     mesh_utils.add_modifier(shoes, "SUBSURF", levels=1, render_levels=1)
     mesh_utils.apply_modifiers(shoes)
@@ -551,7 +602,8 @@ def build_shoes(body, params, armature) -> bpy.types.Object:
 
 
 def build_sailor_uniform(body, params, armature) -> bpy.types.Object:
-    shape = SkirtShape(body)
+    _uniform_colors(params.uniform)
+    shape = SkirtShape(body, UniformLevels.from_armature(armature))
     skirt = build_skirt(body, params, armature, shape)
     top = build_top(body, params, armature, shape)
     collar = build_collar(top, params, armature)
@@ -583,8 +635,8 @@ def build_collision_proxy(armature, params, radius: float = 0.22) -> bpy.types.O
             rings.append([Vector((ring_radius * math.cos(2 * math.pi * index / segments),
                                   ring_radius * math.sin(2 * math.pi * index / segments), z)) for index in range(segments)])
     vertices, faces = mesh_utils.loft(rings)
+    vertices, faces, _ = mesh_utils.weld_geometry(vertices, faces, [0] * len(faces))
     proxy = mesh_utils.mesh_from_geometry(f"{params.prefix}-col", vertices, faces, [principled("M_CollisionProxy", (0.5, 0.5, 0.5), 1.0)])
-    _weld(proxy)
     mesh_utils.recalculate_normals(proxy)
     proxy.parent = armature
     proxy.matrix_parent_inverse.identity()

@@ -3,6 +3,11 @@ extends TestCase
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
 const REQUIRED_BONES: Array[String] = ["head", "braid_06", "skirt_front_02"]
 const REQUIRED_BLEND_SHAPES: Array[String] = ["neutral", "startled", "suspicious", "happy", "blink"]
+const REQUIRED_MESHES: Array[String] = [
+	"TargetBody", "TargetHead", "TargetFace", "TargetHair", "TargetBraid", "TargetBows", "TargetUniform",
+]
+const SHADOWLESS_MESHES: Array[String] = ["TargetHair", "TargetBows"]
+const PROXY_MATERIAL_NAME: String = "M_CollisionProxy"
 
 
 func test_target_glb_structure() -> void:
@@ -22,8 +27,10 @@ func test_target_glb_structure() -> void:
 		for bone_name: String in REQUIRED_BONES:
 			assert_true(skeleton.find_bone(bone_name) >= 0, "bone %s exists" % bone_name)
 
+	for mesh_name: String in REQUIRED_MESHES:
+		assert_true(root.find_child(mesh_name, true, false) is MeshInstance3D, "mesh %s exists" % mesh_name)
+
 	var face: MeshInstance3D = root.find_child("TargetFace", true, false) as MeshInstance3D
-	assert_true(face != null, "TargetFace mesh instance exists")
 	if face != null:
 		var blend_shape_names: Array[String] = []
 		for blend_shape_index: int in face.mesh.get_blend_shape_count():
@@ -34,12 +41,19 @@ func test_target_glb_structure() -> void:
 	assert_true(root.has_meta("body_shape"), "root has body_shape meta")
 	if root.has_meta("body_shape"):
 		assert_true(root.get_meta("body_shape") is ConvexPolygonShape3D, "body_shape is convex")
+	assert_true(root.find_child("Target-col", true, false) == null, "no node named Target-col")
+	assert_eq(root.find_children("*", "StaticBody3D", true, false).size(), 0, "no StaticBody3D left")
 
-	var mesh_instances: Array[Node] = root.find_children("*", "MeshInstance3D", true, false)
-	assert_true(mesh_instances.size() >= 7, "body, head, face, hair, braid, bows and uniform meshes exist")
-	for node: Node in mesh_instances:
+	for mesh_name: String in SHADOWLESS_MESHES:
+		var shadowless: MeshInstance3D = root.find_child(mesh_name, true, false) as MeshInstance3D
+		if shadowless != null:
+			assert_eq(shadowless.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "%s casts no shadow" % mesh_name)
+
+	for node: Node in root.find_children("*", "MeshInstance3D", true, false):
 		var instance: MeshInstance3D = node as MeshInstance3D
 		for surface_index: int in instance.mesh.get_surface_count():
 			var material: Material = instance.get_active_material(surface_index)
 			assert_true(material is ShaderMaterial, "%s surface %d is a ShaderMaterial" % [instance.name, surface_index])
+			if material != null:
+				assert_true(material.resource_name != PROXY_MATERIAL_NAME, "%s is not the collision proxy" % instance.name)
 	root.free()

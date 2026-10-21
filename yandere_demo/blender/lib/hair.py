@@ -178,13 +178,13 @@ def _layout_strands(params, seed: int = 7) -> dict:
     for index in range(11):
         phi = 112 + index * 13.6 + jitter(3)
         behind = abs(((phi + 180) % 360) - 180)
-        hang = 0.115 + jitter(0.02) + (0.03 if behind > 160 else 0.0)
+        hang = 0.155 + jitter(0.02) + (0.03 if behind > 160 else 0.0)
         back.append(Strand(phi, 100 + jitter(3), hang, 0.062 + jitter(0.006), scale=1.04 + jitter(0.01),
                            flare=0.035 + jitter(0.012), curl=0.004, tip_bend=0.018 + jitter(0.01), sway=jitter(6)))
     inner = []
     for index in range(16):
         phi = 70 + index * 14.0 + jitter(3)
-        inner.append(Strand(phi, 100, 0.09 + jitter(0.015), 0.07, material=HAIR_SHADE, scale=0.985,
+        inner.append(Strand(phi, 100, 0.125 + jitter(0.015), 0.07, material=HAIR_SHADE, scale=0.985,
                             flare=0.02, tip_bend=0.008, sway=jitter(5)))
     crown = []
     for index in range(7):
@@ -383,58 +383,64 @@ def _braid_tuft(tip: Vector, tangent: Vector) -> list:
 
 
 def bow_geometry(origin: Vector, outward: Vector, up_hint: Vector, size: float = 1.0):
-    """Ribbon bow: two pinched loops, a knot and two tails, in the plane facing `outward`."""
+    """Flat ribbon bow lying in the plane facing `outward`: two bow-tie loops, a small knot and two tails."""
     normal = outward.normalized()
     up = (up_hint - normal * normal.dot(up_hint)).normalized()
     across = up.cross(normal).normalized()
     basis = Matrix((across, up, normal)).transposed()
     parts = []
-    knot_vertices, knot_faces = mesh_utils.ellipsoid(origin, Vector((0.010, 0.012, 0.009)) * size, 12, 8, basis)
+    knot_vertices, knot_faces = mesh_utils.ellipsoid(origin + normal * 0.0015 * size, Vector((0.0075, 0.0095, 0.0042)) * size, 12, 8, basis)
     parts.append((knot_vertices, knot_faces, 0))
     for sign in (1.0, -1.0):
         parts.append(_bow_loop(origin, across * sign, up, normal, size))
-        outer = across * sign
-        thickness = normal * 0.0016
-        tail_rings = []
-        for step in range(5):
-            fraction = step / 4
-            center = origin + (-up * 0.042 * fraction + outer * (0.010 + 0.014 * fraction)) * size - normal * 0.002
-            half_width = outer * (0.0085 + 0.002 * fraction) * size
-            # The tail end is cut on a slant: its outer edge reaches further down.
-            slant = -up * 0.008 * size if step == 4 else Vector((0, 0, 0))
-            tail_rings.append([
-                center - half_width + thickness,
-                center + half_width + thickness + slant,
-                center + half_width - thickness + slant,
-                center - half_width - thickness,
-            ])
-        vertices, faces = mesh_utils.loft(tail_rings, closed=True, cap_start=True, cap_end=True)
-        parts.append((vertices, faces, 0))
+        parts.append(_bow_tail(origin, across * sign, up, normal, size))
     return parts
 
 
 def _bow_loop(origin: Vector, outward_axis: Vector, up: Vector, normal: Vector, size: float):
-    """A teardrop ribbon loop, pinched at the knot, rounded at the tip and dished on its face."""
-    angle = math.radians(20)
+    """A flat bow-tie loop: pinched at the knot, widening to a squared, softly rounded outer end."""
+    angle = math.radians(14)
     direction = (outward_axis * math.cos(angle) + up * math.sin(angle)).normalized()
     perpendicular = normal.cross(direction).normalized()
-    length, height, depth = 0.037 * size, 0.020 * size, 0.0055 * size
+    length, height, depth = 0.034 * size, 0.0175 * size, 0.0021 * size
+    corner = 0.8
     rings = []
-    steps = 12
-    for step in range(1, steps):
-        fraction = step / steps
-        half_height = height * math.sin(math.pi * fraction) ** 0.7 * (0.45 + 0.55 * fraction)
-        half_depth = depth * (0.55 + 0.45 * math.sin(math.pi * fraction))
-        center = origin + direction * length * fraction - normal * 0.007 * size * fraction * fraction
+    steps = 14
+    for step in range(1, steps + 1):
+        fraction = step / steps * 0.995
+        half_height = height * min(fraction, corner) ** 0.8
+        if fraction > corner:
+            half_height *= math.sqrt(max(0.0, 1.0 - ((fraction - corner) / (1.0 - corner)) ** 2))
+        half_height = max(half_height, 0.0008 * size)
+        # A shallow V across the ribbon reads as the fold of a pressed loop under toon shading.
+        fold = 0.0018 * size * math.sin(math.pi * min(1.0, fraction / corner))
+        center = origin + direction * length * fraction - normal * 0.002 * size * fraction * fraction
         ring = []
-        for index in range(12):
-            theta = 2 * math.pi * index / 12
+        for index in range(10):
+            theta = 2 * math.pi * index / 10
             across = math.cos(theta)
-            forward = math.sin(theta) * half_depth
-            if forward > 0:
-                forward -= 0.7 * half_depth * (1 - across * across) * math.sin(math.pi * fraction)
+            forward = math.sin(theta) * depth - fold * abs(across)
             ring.append(center + perpendicular * half_height * across + normal * forward)
         rings.append(ring)
+    vertices, faces = mesh_utils.loft(rings, cap_start=True, cap_end=True)
+    return vertices, faces, 0
+
+
+def _bow_tail(origin: Vector, outward_axis: Vector, up: Vector, normal: Vector, size: float):
+    """A short flat tail hanging from the knot, cut on a slant."""
+    thickness = normal * 0.0011 * size
+    rings = []
+    for step in range(4):
+        fraction = step / 3
+        center = origin + (-up * 0.024 * fraction + outward_axis * (0.004 + 0.010 * fraction)) * size - normal * 0.0015 * size
+        half_width = outward_axis * (0.0055 + 0.0015 * fraction) * size
+        slant = -up * 0.006 * size if step == 3 else Vector((0, 0, 0))
+        rings.append([
+            center - half_width + thickness,
+            center + half_width + thickness + slant,
+            center + half_width - thickness + slant,
+            center - half_width - thickness,
+        ])
     vertices, faces = mesh_utils.loft(rings, cap_start=True, cap_end=True)
     return vertices, faces, 0
 
@@ -442,21 +448,19 @@ def _bow_loop(origin: Vector, outward_axis: Vector, up: Vector, normal: Vector, 
 def build_bows(params, armature) -> bpy.types.Object:
     center = head_center(armature)
     parts = []
-    for phi in (-82.0, 80.0):
-        origin = surface_point(center, 40, phi, 1.13)
+    # Upper back sides of the head, lying flat on the hair like the references' ribbons.
+    for phi in (-114.0, 114.0):
+        origin = surface_point(center, 55, phi, 1.16)
         normal = surface_normal(center, origin)
-        sideways = Vector((normal.x, normal.y, 0)).normalized()
-        outward = (sideways * 0.65 + Vector((0, -1.0, 0.2))).normalized()
-        parts += bow_geometry(origin, outward, Vector((-sideways.x * 0.35, 0.2, 1)), 1.25 * HEAD_SCALE)
+        facing = (normal + Vector((0, 0.3, 0))).normalized()
+        parts += bow_geometry(origin, facing, Vector((0, -0.25, 1)), 1.6 * HEAD_SCALE)
     curve = _braid_curve(armature, params, 40)
     tip = curve[-1]
     tangent = (curve[-1] - curve[-3]).normalized()
-    parts += bow_geometry(tip + Vector((0, -0.022, 0.004)), Vector((0.1, -1.0, 0.05)), -tangent, 1.35)
+    parts += bow_geometry(tip + Vector((0, -0.022, 0.004)), Vector((0.1, -1.0, 0.05)), -tangent, 1.5)
     vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
     bows = mesh_utils.mesh_from_geometry(f"{params.prefix}Bows", vertices, faces, [principled("M_Bow", "#1d151b", 0.35)], material_indices)
     mesh_utils.recalculate_normals(bows)
-    mesh_utils.add_modifier(bows, "SUBSURF", levels=1, render_levels=1)
-    mesh_utils.apply_modifiers(bows)
     braid_tip = tip
     head_vertices = [vertex.index for vertex in bows.data.vertices if (vertex.co - braid_tip).length > 0.12]
     braid_vertices = [vertex.index for vertex in bows.data.vertices if (vertex.co - braid_tip).length <= 0.12]

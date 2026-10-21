@@ -22,7 +22,7 @@ class CharacterParams:
     uniform: str = "sailor_red"
     hair_style: str = "target"
     body_type: str = "female"
-    sock_top_height: float = 0.64
+    sock_top_fraction: float = 0.405
     extra: dict = field(default_factory=dict)
 
 
@@ -68,7 +68,7 @@ def build_body(armature, params: CharacterParams) -> bpy.types.Object:
     for polygon in body.data.polygons:
         center = polygon.center
         label = _nearest_label(center, segments)
-        is_sock = label == LEG_LABEL and center.z < params.sock_top_height
+        is_sock = label == LEG_LABEL and center.z < params.sock_top_fraction * params.height
         material_indices.append(1 if is_sock else 0)
     body.data.polygons.foreach_set("material_index", material_indices)
 

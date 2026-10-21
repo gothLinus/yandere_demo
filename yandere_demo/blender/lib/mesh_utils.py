@@ -166,6 +166,31 @@ def ellipsoid(center: Vector, radii: Vector, segments: int = 16, rings: int = 10
     return vertices, faces
 
 
+def weld_geometry(vertices: list, faces: list, material_indices: list, precision: int = 6):
+    """Merge coincident vertices in a fixed order (bmesh remove_doubles is not order-stable) and drop
+    faces that collapse to fewer than three corners."""
+    welded: list = []
+    index_by_key: dict = {}
+    remap = []
+    for vertex in vertices:
+        key = tuple(round(coordinate, precision) for coordinate in vertex)
+        if key not in index_by_key:
+            index_by_key[key] = len(welded)
+            welded.append(vertex)
+        remap.append(index_by_key[key])
+    kept_faces, kept_materials = [], []
+    for face, material_index in zip(faces, material_indices):
+        corners = []
+        for index in face:
+            mapped = remap[index]
+            if mapped not in corners:
+                corners.append(mapped)
+        if len(corners) >= 3:
+            kept_faces.append(tuple(corners))
+            kept_materials.append(material_index)
+    return welded, kept_faces, kept_materials
+
+
 def merge_geometry(parts: list):
     """Concatenate (vertices, faces, material_index) parts into one vertex/face/material list."""
     vertices, faces, material_indices = [], [], []

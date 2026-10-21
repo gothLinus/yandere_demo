@@ -11,7 +11,9 @@ def validate_character(
     required_shape_keys: list[str],
     required_actions: list[str],
     required_bones: list[str],
+    required_meshes: list[str] | None = None,
 ) -> list[str]:
+    """Return error strings. `required_meshes` are part names, checked as f"{prefix}{part}" mesh children."""
     errors: list[str] = []
     armature = bpy.data.objects.get(f"{prefix}Char")
     if armature is None or armature.type != "ARMATURE":
@@ -21,6 +23,11 @@ def validate_character(
     for bone_name in required_bones:
         if bone_name not in bone_names:
             errors.append(f"bone {bone_name} is missing from {armature.name}")
+
+    for part in required_meshes or []:
+        mesh_object = bpy.data.objects.get(f"{prefix}{part}")
+        if mesh_object is None or mesh_object.type != "MESH" or mesh_object.parent != armature:
+            errors.append(f"mesh {prefix}{part} is missing or not parented to {armature.name}")
 
     errors.extend(_validate_face(prefix, required_shape_keys))
     errors.extend(_validate_collision_proxy(prefix, armature))
@@ -37,12 +44,11 @@ def _validate_face(prefix: str, required_shape_keys: list[str]) -> list[str]:
     if face is None:
         return [f"face mesh {prefix}Face is missing"] if required_shape_keys else []
     keys = face.data.shape_keys
-    names = [block.name for block in keys.key_blocks] if keys else []
-    return [
-        f"shape key {key_name} is missing on {face.name}"
-        for key_name in required_shape_keys
-        if key_name not in names
-    ]
+    names = sorted(block.name for block in keys.key_blocks) if keys else []
+    expected = sorted(["Basis"] + list(required_shape_keys))
+    if names != expected:
+        return [f"{face.name} shape keys are {names}, expected exactly {expected}"]
+    return []
 
 
 def _validate_collision_proxy(prefix: str, armature) -> list[str]:

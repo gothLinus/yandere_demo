@@ -172,10 +172,12 @@ def paint_eye_texture(path: str, iris_color: tuple, highlight: bool, size: int =
     pixels = numpy.concatenate([numpy.clip(color, 0, 1), alpha[..., None]], axis=-1).astype(numpy.float32)
 
     name = os.path.basename(path)
-    existing = bpy.data.images.get(name)
-    if existing is not None:
-        bpy.data.images.remove(existing)
-    image = bpy.data.images.new(name, size, size, alpha=True)
+    # Repaint an existing datablock in place: materials built earlier in the same file still point at it.
+    image = bpy.data.images.get(name)
+    if image is None:
+        image = bpy.data.images.new(name, size, size, alpha=True)
+    elif tuple(image.size) != (size, size):
+        image.scale(size, size)
     image.pixels.foreach_set(pixels.ravel())
     os.makedirs(os.path.dirname(path), exist_ok=True)
     image.filepath_raw = path
@@ -232,6 +234,10 @@ EXPRESSION_SETTINGS = {
 }
 
 LID_COLUMNS = 13
+LID_OFFSET = 0.0022
+LID_EDGE_OFFSET = 0.0004
+LASH_OFFSET = 0.0026
+LID_COVER_REACH = 0.04
 CARD_COLUMNS = 10
 CARD_ROWS = 10
 
@@ -290,34 +296,37 @@ class _FaceBuilder:
         return vertices, faces, 0
 
     def _lids(self, side: float, expression: _Expression, uvs: list):
-        upper_rows = []
-        lower_rows = []
+        """Skin flaps that slide over the eye card, plus the geometric upper lash band.
+
+        Each flap reaches well past the painted lashes and its outer row sits almost on the skin, so a
+        closed lid leaves no sliver of lash or flap edge where the open eye's outline was.
+        """
+        cover_rows, lash_rows, lower_rows = [], [], []
         for column in range(LID_COLUMNS + 1):
             s = column / LID_COLUMNS
             top = float(eye_top(s))
             bottom = float(eye_bottom(s))
             closed = float(closed_line(s))
+            closure = min(1.0, max(0.0, expression.upper_lid))
             lash_bottom_open = top - 0.075
             lash_bottom = lash_bottom_open + (closed - 0.03 - lash_bottom_open) * expression.upper_lid
-            lash_top = lash_bottom + 0.11 - 0.04 * min(1.0, max(0.0, expression.upper_lid))
-            cover_top = max(top + 0.035, lash_top)
+            lash_top = lash_bottom + 0.12 - 0.05 * closure
+            cover_inner = max(top + 0.045, lash_top)
+            cover_rows.append(((cover_inner + LID_COVER_REACH, LID_EDGE_OFFSET), (cover_inner, LID_OFFSET), (lash_top, LID_OFFSET)))
+            lash_rows.append(((lash_top, LASH_OFFSET), (lash_bottom, LASH_OFFSET)))
             lower_fixed = bottom - 0.03
             lower_edge = lower_fixed + (closed - 0.03 - lower_fixed) * expression.lower_lid
-            upper_rows.append((cover_top, lash_top, lash_bottom))
-            lower_rows.append((lower_fixed, lower_edge))
-        flap_vertices, lash_vertices, lower_vertices = [], [], []
-        for column in range(LID_COLUMNS + 1):
-            s = column / LID_COLUMNS
-            cover_top, lash_top, lash_bottom = upper_rows[column]
-            flap_vertices += [self.eye_point(side, s, cover_top, expression, 0.0022), self.eye_point(side, s, lash_top, expression, 0.0022)]
-            lash_vertices += [self.eye_point(side, s, lash_top, expression, 0.0026), self.eye_point(side, s, lash_bottom, expression, 0.0026)]
-            lower_fixed, lower_edge = lower_rows[column]
-            lower_vertices += [self.eye_point(side, s, lower_fixed, expression, 0.0022), self.eye_point(side, s, lower_edge, expression, 0.0022)]
-        return [
-            self._strip(flap_vertices, side, 1, uvs),
-            self._strip(lash_vertices, side, 2, uvs),
-            self._strip(lower_vertices, side, 1, uvs, flip=True),
-        ]
+            lower_rows.append(((lower_fixed - LID_COVER_REACH, LID_EDGE_OFFSET), (lower_fixed, LID_OFFSET), (lower_edge, LID_OFFSET)))
+        strips = []
+        for rows, material_index, flip in ((cover_rows, 1, False), (lash_rows, 2, False), (lower_rows, 1, True)):
+            for band in range(len(rows[0]) - 1):
+                vertices = []
+                for column in range(LID_COLUMNS + 1):
+                    s = column / LID_COLUMNS
+                    for t, offset in rows[column][band:band + 2]:
+                        vertices.append(self.eye_point(side, s, t, expression, offset))
+                strips.append(self._strip(vertices, side, material_index, uvs, flip=flip))
+        return strips
 
     def _strip(self, vertices: list, side: float, material_index: int, uvs: list, flip: bool = False):
         faces = []
