@@ -70,19 +70,12 @@ func _find_fixed(block_id: StringName) -> ActivityDefinition:
 	return null
 
 
-# Fallback ladder so a draw never dead-ends: penalties first, then the no-repeat rule.
+# No penalty-free rung: penalties are multipliers, so they never reduce a weight to zero.
 func _pick_activity(block_id: StringName, history: ActivityHistory, previous_id: StringName, rng: RandomNumberGenerator) -> ActivityDefinition:
 	var weights: Array[float] = []
 	for activity: ActivityDefinition in _pool.activities:
 		weights.append(0.0 if activity.is_fixed else weight_for(activity, block_id, history, previous_id))
 	var picked: ActivityDefinition = _weighted_choice(weights, rng)
-	if picked != null:
-		return picked
-	weights.clear()
-	for activity: ActivityDefinition in _pool.activities:
-		var eligible: bool = not activity.is_fixed and activity.allowed_blocks.has(block_id) and activity.id != previous_id
-		weights.append(activity.base_weight if eligible else 0.0)
-	picked = _weighted_choice(weights, rng)
 	if picked != null:
 		return picked
 	weights.clear()
