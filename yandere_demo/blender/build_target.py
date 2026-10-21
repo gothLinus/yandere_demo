@@ -15,10 +15,13 @@ PROJECT_DIRECTORY = os.path.dirname(BLENDER_DIRECTORY)
 if BLENDER_DIRECTORY not in sys.path:
     sys.path.insert(0, BLENDER_DIRECTORY)
 
-from lib import animation, body, clothing, export, face, hair, materials, mesh_utils, rig, target_animations  # noqa: E402
+from lib import (  # noqa: E402
+    animation, body, character_animation, clothing, export, face, hair, materials, mesh_utils, rig, target_animations,
+)
 
 # A live Blender session keeps modules cached between runs; reload so edits take effect.
-for module in (materials, mesh_utils, rig, body, face, hair, clothing, export, animation, target_animations):
+for module in (materials, mesh_utils, rig, body, face, hair, clothing, export, animation, character_animation,
+               target_animations):
     importlib.reload(module)
 
 BLEND_PATH = os.path.join(BLENDER_DIRECTORY, "target.blend")

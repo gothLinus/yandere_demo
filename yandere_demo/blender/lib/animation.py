@@ -73,8 +73,35 @@ class Skeleton:
         self.tails = {bone.name: bone.tail_local.copy() for bone in bones}
         self.rest_rotations = {bone.name: bone.matrix_local.to_quaternion() for bone in bones}
 
+        self.children = {bone.name: [child.name for child in bone.children] for bone in bones}
+        self._chains: dict = {}
+
     def length(self, name: str) -> float:
         return (self.tails[name] - self.heads[name]).length
+
+    def _follow_chain(self, root: str, prefix: str) -> list:
+        chain = [root]
+        while True:
+            next_bones = [child for child in self.children[chain[-1]] if child.startswith(prefix)]
+            if not next_bones:
+                return chain
+            chain.append(sorted(next_bones)[0])
+
+    def chains(self, prefix: str) -> list:
+        """Bone chains whose names start with `prefix`, root first, in name order."""
+        key = ("prefix", prefix)
+        if key not in self._chains:
+            roots = [name for name in sorted(self.names) if name.startswith(prefix)
+                     and not (self.parents[name] or "").startswith(prefix)]
+            self._chains[key] = [self._follow_chain(root, prefix) for root in roots]
+        return self._chains[key]
+
+    def chains_under(self, parent: str) -> list:
+        """One chain per child of `parent` (e.g. the fingers of a hand), each followed down its first child."""
+        key = ("parent", parent)
+        if key not in self._chains:
+            self._chains[key] = [self._follow_chain(child, "") for child in sorted(self.children[parent])]
+        return self._chains[key]
 
     def direction(self, name: str) -> Vector:
         return (self.tails[name] - self.heads[name]).normalized()
@@ -224,6 +251,9 @@ class Curve:
         self.period = period
         if period is not None:
             if keys[-1][0] >= period - 1e-6:
+                first_frame, first_values = keys[0]
+                if abs(first_frame) > 1e-6 or any(abs(last - first) > 1e-9 for last, first in zip(keys[-1][1], first_values)):
+                    raise ValueError(f"periodic curve: key at frame {period} must repeat the key at frame 0")
                 keys = keys[:-1]
             body = keys
             before = [(frame - period, values) for frame, values in body[-2:]]
@@ -376,9 +406,20 @@ def aim_hand(skeleton: Skeleton, pose: Pose, side: str, finger_direction, palm_d
 
 
 def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: float, thumb_degrees: float) -> None:
+    """Curl every finger chain under the hand toward the palm, sharing the angle evenly over its segments.
+
+    Chains whose root name contains "thumb" take `thumb_degrees` and curl across the palm; all others take
+    `fingers_degrees`. A single-bone finger is the one-segment case.
+    """
+    hand = f"hand{side}"
     palm = palm_normal(skeleton, side)
-    bend(skeleton, pose, f"fingers{side}", fingers_degrees, palm)
-    bend(skeleton, pose, f"thumb{side}", thumb_degrees, palm + skeleton.direction(f"hand{side}") * 0.5)
+    across_palm = palm + skeleton.direction(hand) * 0.5
+    for chain in skeleton.chains_under(hand):
+        is_thumb = "thumb" in chain[0]
+        angle = (thumb_degrees if is_thumb else fingers_degrees) / len(chain)
+        for bone in chain:
+            pose.rotations[bone] = Quaternion()
+            bend(skeleton, pose, bone, angle, across_palm if is_thumb else palm)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -396,13 +437,42 @@ def idle_breathing(pose: Pose, phase: float, amount: float = 1.0) -> None:
         pose.turn_side("upper_arm", side, y=-1.0 * amount * breath)
 
 
-def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seated: float | None = None) -> None:
-    """Swing the skirt bones with the thighs so the hem rides over the legs instead of through them.
+SKIRT_PREFIX = "skirt_"
 
-    Front and back follow the forward/backward thigh swing, the sides follow the side sway (degrees about
-    the forward axis, positive swings the hem toward +X) and the thigh spread. `seated` (0..1) drapes the
-    skirt over the lap; by default it is derived from the thigh lift.
+
+def _skirt_facing(skeleton: Skeleton, chain: list) -> tuple[Vector, dict]:
+    """Outward azimuth of a skirt chain around the hips, and its share of front, back, left and right."""
+    root = chain[0]
+    parent = skeleton.parents[root]
+    center = skeleton.heads[parent] if parent else Vector()
+    outward = (skeleton.heads[root] - center) + skeleton.direction(root)
+    azimuth = Vector((outward.x, outward.y, 0.0))
+    azimuth = azimuth.normalized() if azimuth.length > 1e-6 else Vector((0.0, -1.0, 0.0))
+    facing = {"front": max(0.0, -azimuth.y), "back": max(0.0, azimuth.y),
+              ".L": max(0.0, azimuth.x), ".R": max(0.0, -azimuth.x)}
+    total = sum(facing.values())
+    return azimuth, {name: share / total for name, share in facing.items()}
+
+
+def _tip_swing(toward_back: float, toward_left: float) -> Quaternion:
+    """Rest-axis rotation that swings a hanging bone's tip by degrees toward +Y and toward +X."""
+    return degrees(x=toward_back, y=-toward_left)
+
+
+def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seated: float | None = None) -> None:
+    """Swing every skirt chain with the thighs so the hem rides over the legs instead of through them.
+
+    Chains are found by the `skirt_` prefix, so any number of chains with any number of segments works.
+    Each chain gets an azimuth from its rest direction and blends four behaviours by how much it faces
+    front, back, left or right: front panels follow the forward thigh swing, back panels the backward
+    swing, side panels their own thigh's lift and spread. `sway_degrees` swings every hem toward +X.
+    The root segment takes the main swing; the remaining segments share the follow-through (hem droop,
+    seated drape). `seated` (0..1) drapes the skirt over the lap; by default it is derived from the
+    thigh lift.
     """
+    chains = skeleton.chains(SKIRT_PREFIX)
+    if not chains:
+        return
     world, _ = forward_kinematics(skeleton, pose)
     hips_inverse = world["hips"].inverted()
     forward_angles = {}
@@ -429,21 +499,30 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
     # Past the knees the hem droops instead of sticking out like a shelf.
     droop = max(0.0, front - 25.0) * 0.9
     back = backward * 0.6
-    pose.rotations["skirt_front_01"] = degrees(x=-front * (1.0 - 0.15 * seated), y=-sway_degrees)
-    pose.rotations["skirt_front_02"] = degrees(x=(droop - front * 0.18) * (1.0 - seated) + 24.0 * seated)
-    # Seated, the back panel angles down past the buttocks and then lies flat on the seat.
-    pose.rotations["skirt_back_01"] = degrees(x=back + 34.0 * seated + hang, y=-sway_degrees)
-    pose.rotations["skirt_back_02"] = degrees(x=back * 0.25 + 30.0 * seated)
-    # Sat-on fabric bunches up instead of trailing far behind the seat.
-    pose.scales["skirt_back_01"] = Vector((1.0, 1.0 - 0.25 * seated, 1.0))
-    pose.scales["skirt_back_02"] = Vector((1.0, 1.0 - 0.35 * seated, 1.0))
-    for side in SIDES:
-        sign = side_sign(side)
-        spread = max(0.0, spread_angles[side]) * 0.7
-        lift = max(0.0, forward_angles[side]) * 0.3 * (1.0 - seated)
-        side_bone = "left" if side == ".L" else "right"
-        pose.rotations[f"skirt_{side_bone}_01"] = degrees(x=-lift - 12.0 * seated + side_hang, y=-sign * (spread - 6.0 * seated) - sway_degrees)
-        pose.rotations[f"skirt_{side_bone}_02"] = degrees(x=-6.0 * seated, y=-sign * spread * 0.2 - sway_degrees * 0.4)
+    spreads = {side: max(0.0, spread_angles[side]) * 0.7 for side in SIDES}
+    lifts = {side: max(0.0, forward_angles[side]) * 0.3 * (1.0 - seated) for side in SIDES}
+
+    for chain in chains:
+        _, share = _skirt_facing(skeleton, chain)
+        sides = share[".L"] + share[".R"]
+        # Seated, the back panel angles down past the buttocks and the sides drape forward over the thighs.
+        root_back = (share["back"] * (back + 34.0 * seated + hang)
+                     - share["front"] * front * (1.0 - 0.15 * seated)
+                     + sum(share[side] * (side_hang - lifts[side] - 12.0 * seated) for side in SIDES))
+        root_left = sway_degrees + sum(share[side] * side_sign(side) * (spreads[side] - 6.0 * seated) for side in SIDES)
+        follow_back = (share["front"] * ((droop - front * 0.18) * (1.0 - seated) + 24.0 * seated)
+                       + share["back"] * (back * 0.25 + 30.0 * seated) - sides * 6.0 * seated)
+        follow_left = sum(share[side] * (side_sign(side) * spreads[side] * 0.2 + sway_degrees * 0.4) for side in SIDES)
+        segments = len(chain) - 1
+        pose.rotations[chain[0]] = _tip_swing(root_back, root_left)
+        for bone in chain[1:]:
+            pose.rotations[bone] = _tip_swing(follow_back / segments, follow_left / segments)
+        if share["back"] > 1e-3:
+            # Sat-on fabric bunches up instead of trailing far behind the seat.
+            pose.scales[chain[0]] = Vector((1.0, 1.0 - 0.25 * seated * share["back"], 1.0))
+            follow_scale = (1.0 - 0.35 * seated * share["back"]) ** (1.0 / max(1, segments))
+            for bone in chain[1:]:
+                pose.scales[bone] = Vector((1.0, follow_scale, 1.0))
 
 
 # ---------------------------------------------------------------------------------------------------

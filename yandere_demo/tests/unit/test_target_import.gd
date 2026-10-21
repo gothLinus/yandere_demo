@@ -28,7 +28,10 @@ const REQUIRED_ANIMATIONS: Dictionary[StringName, int] = {
 	&"target_wave": 45,
 }
 const LOOPING_ANIMATIONS: Array[StringName] = [&"target_idle", &"target_walk_routine", &"target_sit"]
-const ONE_SHOT_ANIMATIONS: Array[StringName] = [&"target_sit_down", &"target_startled"]
+# Mirrors character_post_import.gd: these play once, every other clip loops linearly.
+const ONE_SHOT_ANIMATIONS: Array[StringName] = [
+	&"target_notice_player", &"target_startled", &"target_sit_down", &"target_stand_up",
+]
 
 
 func test_target_glb_structure() -> void:
@@ -97,6 +100,6 @@ func _assert_animations(root: Node) -> void:
 	for animation_name: StringName in LOOPING_ANIMATIONS:
 		if player.has_animation(animation_name):
 			assert_true(player.get_animation(animation_name).loop_mode != Animation.LOOP_NONE, "%s loops" % animation_name)
-	for animation_name: StringName in ONE_SHOT_ANIMATIONS:
-		if player.has_animation(animation_name):
-			assert_eq(player.get_animation(animation_name).loop_mode, Animation.LOOP_NONE, "%s plays once" % animation_name)
+	for animation_name: StringName in player.get_animation_list():
+		var expected_loop: Animation.LoopMode = Animation.LOOP_NONE if ONE_SHOT_ANIMATIONS.has(animation_name) else Animation.LOOP_LINEAR
+		assert_eq(player.get_animation(animation_name).loop_mode, expected_loop, "%s loop mode" % animation_name)
