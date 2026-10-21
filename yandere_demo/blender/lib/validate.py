@@ -4,16 +4,22 @@ import bpy
 
 PROXY_MATERIAL_NAME = "M_CollisionProxy"
 IDENTITY_TOLERANCE = 1e-5
+LOOP_SEAM_TOLERANCE = 1e-4
+ANIMATION_FPS = 30
 
 
 def validate_character(
     prefix: str,
     required_shape_keys: list[str],
-    required_actions: list[str],
+    required_actions: dict[str, tuple[int, bool]],
     required_bones: list[str],
     required_meshes: list[str] | None = None,
 ) -> list[str]:
-    """Return error strings. `required_meshes` are part names, checked as f"{prefix}{part}" mesh children."""
+    """Return error strings.
+
+    `required_actions` maps action name to (frame count, loops). `required_meshes` are part names,
+    checked as f"{prefix}{part}" mesh children.
+    """
     errors: list[str] = []
     armature = bpy.data.objects.get(f"{prefix}Char")
     if armature is None or armature.type != "ARMATURE":
@@ -33,10 +39,45 @@ def validate_character(
     errors.extend(_validate_collision_proxy(prefix, armature))
     errors.extend(_validate_meshes(armature))
 
-    for action_name in required_actions:
-        if bpy.data.actions.get(action_name) is None:
-            errors.append(f"action {action_name} is missing")
+    errors.extend(_validate_actions(armature, required_actions))
     return errors
+
+
+def _validate_actions(armature, required_actions: dict[str, tuple[int, bool]]) -> list[str]:
+    errors: list[str] = []
+    if required_actions and bpy.context.scene.render.fps != ANIMATION_FPS:
+        errors.append(f"scene runs at {bpy.context.scene.render.fps} fps, expected {ANIMATION_FPS}")
+    animation_data = armature.animation_data
+    strip_actions = set()
+    if animation_data is not None:
+        strip_actions = {strip.action.name for track in animation_data.nla_tracks for strip in track.strips if strip.action}
+    for action_name, (frame_count, loops) in required_actions.items():
+        action = bpy.data.actions.get(action_name)
+        if action is None:
+            errors.append(f"action {action_name} is missing")
+            continue
+        if action_name not in strip_actions:
+            errors.append(f"action {action_name} has no NLA strip on {armature.name}")
+        frame_range = tuple(round(value) for value in action.frame_range)
+        if frame_range != (0, frame_count):
+            errors.append(f"action {action_name} spans frames {frame_range}, expected (0, {frame_count})")
+        if loops:
+            for fcurve in action_fcurves(action):
+                points = fcurve.keyframe_points
+                if len(points) and abs(points[0].co[1] - points[-1].co[1]) > LOOP_SEAM_TOLERANCE:
+                    errors.append(f"action {action_name} loops but {fcurve.data_path}[{fcurve.array_index}] differs at the seam")
+                    break
+    return errors
+
+
+def action_fcurves(action) -> list:
+    """F-curves of every layer, strip and slot (Blender 4.4+ layered actions)."""
+    fcurves = []
+    for layer in action.layers:
+        for strip in layer.strips:
+            for channelbag in strip.channelbags:
+                fcurves.extend(channelbag.fcurves)
+    return fcurves
 
 
 def _validate_face(prefix: str, required_shape_keys: list[str]) -> list[str]:

@@ -15,10 +15,10 @@ PROJECT_DIRECTORY = os.path.dirname(BLENDER_DIRECTORY)
 if BLENDER_DIRECTORY not in sys.path:
     sys.path.insert(0, BLENDER_DIRECTORY)
 
-from lib import body, clothing, export, face, hair, materials, mesh_utils, rig  # noqa: E402
+from lib import animation, body, clothing, export, face, hair, materials, mesh_utils, rig, target_animations  # noqa: E402
 
 # A live Blender session keeps modules cached between runs; reload so edits take effect.
-for module in (materials, mesh_utils, rig, body, face, hair, clothing, export):
+for module in (materials, mesh_utils, rig, body, face, hair, clothing, export, animation, target_animations):
     importlib.reload(module)
 
 BLEND_PATH = os.path.join(BLENDER_DIRECTORY, "target.blend")
@@ -71,7 +71,11 @@ def build_target(params: body.CharacterParams) -> bpy.types.Object:
 
 def main() -> None:
     reset_scene()
+    scene = bpy.context.scene
+    scene.render.fps = animation.FPS
+    scene.render.fps_base = 1.0
     armature = build_target(TARGET_PARAMS)
+    target_animations.build_target_actions(armature)
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
     export.export_glb(GLB_PATH, [armature])
     print(f"built {armature.name}: {BLEND_PATH}, {GLB_PATH}")

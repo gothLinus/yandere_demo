@@ -19,13 +19,31 @@ from lib.validate import validate_character  # noqa: E402
 
 FACE_SHAPE_KEYS = ["neutral", "startled", "suspicious", "happy", "blink"]
 TARGET_MESHES = ["Body", "Head", "Face", "Hair", "Braid", "Bows", "Uniform"]
+# Action name -> (frame count at 30 fps, loops).
+TARGET_ACTIONS = {
+    "target_idle": (90, True),
+    "target_walk_routine": (32, True),
+    "target_notice_player": (30, False),
+    "target_startled": (20, False),
+    "target_look_around": (120, True),
+    "target_sit_down": (30, False),
+    "target_stand_up": (30, False),
+    "target_sit": (90, True),
+    "target_sit_read": (120, True),
+    "target_phone": (120, True),
+    "target_drink": (120, True),
+    "target_fix_braid": (150, True),
+    "target_lean_chat": (120, True),
+    "target_sweep": (60, True),
+    "target_wave": (45, True),
+}
 
 CHECKS = {
     "target": {
         "blend": "target.blend",
         "prefix": "Target",
         "shape_keys": FACE_SHAPE_KEYS,
-        "actions": [],
+        "actions": TARGET_ACTIONS,
         "bones": HUMANOID_BONES + BRAID_BONES + SKIRT_BONES,
         "meshes": TARGET_MESHES,
     },

@@ -8,6 +8,27 @@ const REQUIRED_MESHES: Array[String] = [
 ]
 const SHADOWLESS_MESHES: Array[String] = ["TargetHair", "TargetBows"]
 const PROXY_MATERIAL_NAME: String = "M_CollisionProxy"
+const ANIMATION_FPS: float = 30.0
+# Clip name -> frame count at 30 fps.
+const REQUIRED_ANIMATIONS: Dictionary[StringName, int] = {
+	&"target_idle": 90,
+	&"target_walk_routine": 32,
+	&"target_notice_player": 30,
+	&"target_startled": 20,
+	&"target_look_around": 120,
+	&"target_sit_down": 30,
+	&"target_stand_up": 30,
+	&"target_sit": 90,
+	&"target_sit_read": 120,
+	&"target_phone": 120,
+	&"target_drink": 120,
+	&"target_fix_braid": 150,
+	&"target_lean_chat": 120,
+	&"target_sweep": 60,
+	&"target_wave": 45,
+}
+const LOOPING_ANIMATIONS: Array[StringName] = [&"target_idle", &"target_walk_routine", &"target_sit"]
+const ONE_SHOT_ANIMATIONS: Array[StringName] = [&"target_sit_down", &"target_startled"]
 
 
 func test_target_glb_structure() -> void:
@@ -56,4 +77,26 @@ func test_target_glb_structure() -> void:
 			assert_true(material is ShaderMaterial, "%s surface %d is a ShaderMaterial" % [instance.name, surface_index])
 			if material != null:
 				assert_true(material.resource_name != PROXY_MATERIAL_NAME, "%s is not the collision proxy" % instance.name)
+
+	_assert_animations(root)
 	root.free()
+
+
+func _assert_animations(root: Node) -> void:
+	var players: Array[Node] = root.find_children("*", "AnimationPlayer", true, false)
+	assert_eq(players.size(), 1, "one AnimationPlayer")
+	if players.is_empty():
+		return
+	var player: AnimationPlayer = players[0] as AnimationPlayer
+	for animation_name: StringName in REQUIRED_ANIMATIONS:
+		assert_true(player.has_animation(animation_name), "animation %s exists" % animation_name)
+		if not player.has_animation(animation_name):
+			continue
+		var expected_length: float = REQUIRED_ANIMATIONS[animation_name] / ANIMATION_FPS
+		assert_near(player.get_animation(animation_name).length, expected_length, 0.5 / ANIMATION_FPS, "%s length" % animation_name)
+	for animation_name: StringName in LOOPING_ANIMATIONS:
+		if player.has_animation(animation_name):
+			assert_true(player.get_animation(animation_name).loop_mode != Animation.LOOP_NONE, "%s loops" % animation_name)
+	for animation_name: StringName in ONE_SHOT_ANIMATIONS:
+		if player.has_animation(animation_name):
+			assert_eq(player.get_animation(animation_name).loop_mode, Animation.LOOP_NONE, "%s plays once" % animation_name)
