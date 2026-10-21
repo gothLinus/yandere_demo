@@ -26,8 +26,10 @@ func plan_block(block: ScheduleBlock, rng_seed: int, history: ActivityHistory) -
 	var fixed_activity: ActivityDefinition = _find_fixed(block.id)
 
 	if block.kind == GameTypes.BlockKind.CLASS or block.id == &"cleaning" or block.id == &"going_home":
-		if fixed_activity != null:
-			plan.append(_make_planned(fixed_activity, block_minutes, rng))
+		if fixed_activity == null:
+			push_error("No fixed activity in the pool for block %s" % block.id)
+			return plan
+		plan.append(_make_planned(fixed_activity, block_minutes, rng))
 		return plan
 
 	var elapsed_minutes: float = 0.0
