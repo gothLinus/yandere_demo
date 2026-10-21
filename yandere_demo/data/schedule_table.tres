@@ -1,0 +1,72 @@
+[gd_resource type="Resource" script_class="ScheduleTable" load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/schedule_table.gd" id="1_table"]
+[ext_resource type="Script" path="res://scripts/core/schedule_block.gd" id="2_block"]
+
+[sub_resource type="Resource" id="Block_before_school"]
+script = ExtResource("2_block")
+id = &"before_school"
+display_name = "Before School"
+kind = 0
+start_minute = 420
+end_minute = 510
+real_seconds = 300.0
+
+[sub_resource type="Resource" id="Block_morning_class"]
+script = ExtResource("2_block")
+id = &"morning_class"
+display_name = "Morning Classes"
+kind = 1
+start_minute = 510
+end_minute = 780
+real_seconds = 180.0
+
+[sub_resource type="Resource" id="Block_lunch"]
+script = ExtResource("2_block")
+id = &"lunch"
+display_name = "Lunch"
+kind = 0
+start_minute = 780
+end_minute = 825
+real_seconds = 360.0
+
+[sub_resource type="Resource" id="Block_afternoon_class"]
+script = ExtResource("2_block")
+id = &"afternoon_class"
+display_name = "Afternoon Classes"
+kind = 1
+start_minute = 825
+end_minute = 930
+real_seconds = 120.0
+
+[sub_resource type="Resource" id="Block_cleaning"]
+script = ExtResource("2_block")
+id = &"cleaning"
+display_name = "Cleaning Time"
+kind = 0
+start_minute = 930
+end_minute = 960
+real_seconds = 180.0
+
+[sub_resource type="Resource" id="Block_after_school"]
+script = ExtResource("2_block")
+id = &"after_school"
+display_name = "After School"
+kind = 0
+start_minute = 960
+end_minute = 1050
+real_seconds = 360.0
+
+[sub_resource type="Resource" id="Block_going_home"]
+script = ExtResource("2_block")
+id = &"going_home"
+display_name = "Going Home"
+kind = 0
+start_minute = 1050
+end_minute = 1080
+real_seconds = 120.0
+
+[resource]
+script = ExtResource("1_table")
+blocks = Array[ExtResource("2_block")]([SubResource("Block_before_school"), SubResource("Block_morning_class"), SubResource("Block_lunch"), SubResource("Block_afternoon_class"), SubResource("Block_cleaning"), SubResource("Block_after_school"), SubResource("Block_going_home")])
+class_grace_real_seconds = 30.0
