@@ -1,0 +1,92 @@
+[gd_resource type="Resource" script_class="IntelCatalog" load_steps=15 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/intel_catalog.gd" id="1_catalog"]
+[ext_resource type="Script" path="res://scripts/core/intel_card.gd" id="2_card"]
+
+[sub_resource type="Resource" id="Resource_intel_read_bench"]
+script = ExtResource("2_card")
+id = &"intel_read_bench"
+title = "Bench Reader"
+text = "She likes to read quietly on a bench when the day is calm."
+activity_id = &"read_bench"
+
+[sub_resource type="Resource" id="Resource_intel_vending_drink"]
+script = ExtResource("2_card")
+id = &"intel_vending_drink"
+title = "Vending Machine Habit"
+text = "She often stops at the vending machine for a drink."
+activity_id = &"vending_drink"
+
+[sub_resource type="Resource" id="Resource_intel_chat_students"]
+script = ExtResource("2_card")
+id = &"intel_chat_students"
+title = "Friendly Chats"
+text = "She stops to chat with other students when she runs into them."
+activity_id = &"chat_students"
+
+[sub_resource type="Resource" id="Resource_intel_desk_phone"]
+script = ExtResource("2_card")
+id = &"intel_desk_phone"
+title = "Desk Phone Time"
+text = "Between lessons she checks her phone at her desk."
+activity_id = &"desk_phone"
+
+[sub_resource type="Resource" id="Resource_intel_courtyard_stroll"]
+script = ExtResource("2_card")
+id = &"intel_courtyard_stroll"
+title = "Courtyard Walks"
+text = "She sometimes wanders through the courtyard without any hurry."
+activity_id = &"courtyard_stroll"
+
+[sub_resource type="Resource" id="Resource_intel_restroom_braid"]
+script = ExtResource("2_card")
+id = &"intel_restroom_braid"
+title = "Restroom Routine"
+text = "She retreats to the restroom to redo her braid."
+activity_id = &"restroom_braid"
+
+[sub_resource type="Resource" id="Resource_intel_rooftop_visit"]
+script = ExtResource("2_card")
+id = &"intel_rooftop_visit"
+title = "Rooftop Visits"
+text = "Sometimes she slips up to the rooftop to watch the clouds."
+activity_id = &"rooftop_visit"
+
+[sub_resource type="Resource" id="Resource_intel_library_browse"]
+script = ExtResource("2_card")
+id = &"intel_library_browse"
+title = "Library Browsing"
+text = "She wanders the library shelves, looking for something to read."
+activity_id = &"library_browse"
+
+[sub_resource type="Resource" id="Resource_intel_club_activity"]
+script = ExtResource("2_card")
+id = &"intel_club_activity"
+title = "Club Activities"
+text = "She takes part in her club after lessons."
+activity_id = &"club_activity"
+
+[sub_resource type="Resource" id="Resource_intel_poems"]
+script = ExtResource("2_card")
+id = &"intel_poems"
+title = "Secret Poems"
+text = "The folded note holds a few lines of poetry she wrote herself."
+activity_id = &""
+
+[sub_resource type="Resource" id="Resource_intel_spare_ribbon"]
+script = ExtResource("2_card")
+id = &"intel_spare_ribbon"
+title = "Spare Ribbon"
+text = "She keeps a spare black ribbon in case her braid comes loose."
+activity_id = &""
+
+[sub_resource type="Resource" id="Resource_intel_favorite_book"]
+script = ExtResource("2_card")
+id = &"intel_favorite_book"
+title = "Favorite Book"
+text = "The bookmark is tucked into the same well-worn book every time."
+activity_id = &""
+
+[resource]
+script = ExtResource("1_catalog")
+cards = Array[ExtResource("2_card")]([SubResource("Resource_intel_read_bench"), SubResource("Resource_intel_vending_drink"), SubResource("Resource_intel_chat_students"), SubResource("Resource_intel_desk_phone"), SubResource("Resource_intel_courtyard_stroll"), SubResource("Resource_intel_restroom_braid"), SubResource("Resource_intel_rooftop_visit"), SubResource("Resource_intel_library_browse"), SubResource("Resource_intel_club_activity"), SubResource("Resource_intel_poems"), SubResource("Resource_intel_spare_ribbon"), SubResource("Resource_intel_favorite_book")])

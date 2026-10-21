@@ -1,0 +1,57 @@
+[gd_resource type="Resource" script_class="ItemCatalog" load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/item_catalog.gd" id="1_catalog"]
+[ext_resource type="Script" path="res://scripts/core/item_definition.gd" id="2_def"]
+
+[sub_resource type="Resource" id="Resource_hairpin"]
+script = ExtResource("2_def")
+id = &"hairpin"
+display_name = "Hairpin"
+color = Color(0.96, 0.55, 0.72, 1)
+intel_card_id = &""
+
+[sub_resource type="Resource" id="Resource_handkerchief"]
+script = ExtResource("2_def")
+id = &"handkerchief"
+display_name = "Handkerchief"
+color = Color(0.93, 0.93, 0.98, 1)
+intel_card_id = &""
+
+[sub_resource type="Resource" id="Resource_pen"]
+script = ExtResource("2_def")
+id = &"pen"
+display_name = "Pen"
+color = Color(0.2, 0.4, 0.85, 1)
+intel_card_id = &""
+
+[sub_resource type="Resource" id="Resource_drink_can"]
+script = ExtResource("2_def")
+id = &"drink_can"
+display_name = "Strawberry Milk Can"
+color = Color(0.98, 0.7, 0.78, 1)
+intel_card_id = &""
+
+[sub_resource type="Resource" id="Resource_note"]
+script = ExtResource("2_def")
+id = &"note"
+display_name = "Folded Note"
+color = Color(0.98, 0.93, 0.7, 1)
+intel_card_id = &"intel_poems"
+
+[sub_resource type="Resource" id="Resource_spare_ribbon"]
+script = ExtResource("2_def")
+id = &"spare_ribbon"
+display_name = "Spare Black Ribbon"
+color = Color(0.1, 0.1, 0.12, 1)
+intel_card_id = &"intel_spare_ribbon"
+
+[sub_resource type="Resource" id="Resource_bookmark"]
+script = ExtResource("2_def")
+id = &"bookmark"
+display_name = "Bookmark"
+color = Color(0.35, 0.7, 0.5, 1)
+intel_card_id = &"intel_favorite_book"
+
+[resource]
+script = ExtResource("1_catalog")
+items = Array[ExtResource("2_def")]([SubResource("Resource_hairpin"), SubResource("Resource_handkerchief"), SubResource("Resource_pen"), SubResource("Resource_drink_can"), SubResource("Resource_note"), SubResource("Resource_spare_ribbon"), SubResource("Resource_bookmark")])
