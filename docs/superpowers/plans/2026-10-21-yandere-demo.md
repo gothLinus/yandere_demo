@@ -1070,6 +1070,98 @@ The most important visual task. Iterate with blender-mcp `look` until the target
 - [ ] **Step 5: Run the validation + import + unit commands.** Expected: PASS.
 - [ ] **Step 6: Commit** `feat(assets): target animation library`.
 
+### Task 9b: Character upgrade (femboy direction, full rig, physics-ready)
+
+This task implements spec §4.1b. It upgrades the generator and the target in place and migrates the Task 9 animation library onto the new rig. The game is Godot-only: no cloth sim, no VRM/FBX, no T-pose.
+
+**Files:**
+- Modify: `blender/lib/rig.py`, `body.py`, `face.py`, `hair.py`, `clothing.py`, `animation.py`, `validate.py`, `materials.py`
+- Modify: `blender/build_target.py`, `blender/validate_assets.py`
+- Create: `blender/lib/pleats.py`
+- Modify: `assets/shaders/toon.gdshader` (hair highlight band, blush layer), `scripts/core/toon_converter.gd` (material routing for the new slots)
+- Output: `blender/target.blend`, `assets/models/target.glb`, eye and hair textures
+- Test: extend `tests/unit/test_target_import.gd`; extend `validate_assets.py`
+
+**Interfaces:**
+- **Consumes:** everything from Tasks 8 and 9.
+- **Produces: `rig.py` bone set**
+  - Humanoid bone names stay unchanged, so Task 9 clips keep working.
+  - Fingers: `thumb_01..03.L/R`, `index_01..03.L/R`, `middle_01..03.L/R`, `ring_01..03.L/R`, `pinky_01..03.L/R`. These replace `thumb`/`fingers`. Migrate any Task 9 keys on the old bones.
+  - `ahoge_01..03`
+  - `hair_front_L/C/R_01..02`, `hair_side_L/R_01..03`
+  - `braid_01..10`, `braid_bow`
+  - `neckerchief_L/R_01..02`
+  - `sleeve_L/R_01`
+  - `skirt_<n>_01..03` for n = 00..07, with 8 chains around the waist starting at the front center and going clockwise seen from above. These replace `skirt_front/back/left/right`.
+- **Produces: `pleats.py`**
+  - `def build_pleated_skirt(armature, params, pleat_count: int = 20, pleat_depth: float = 0.012, hem_flare: float = 0.18) -> bpy.types.Object` makes even box pleats with a hem trim stripe.
+  - It raises `ValueError` if `pleat_count` is outside 16–24.
+  - The skirt is skinned to the 8 skirt chains.
+- **Produces: `CharacterParams.body_type`** gains `"femboy"`. Its proportions follow spec §4.1b: shoulders narrower than hips × 1.05, a flat chest, a narrow waist, long slim legs, head:height ≈ 1:6.75. The target uses it.
+- **Produces: face shape keys**, exactly the game five plus the ten from §4.1b, plus Basis. Pupil size and highlight are exposed as shape keys `pupil_small` and `pupil_large`. A separate `TargetBlush` cheek mesh with `M_FaceBlush`, alpha-blended, is driven by the `blush` shape key on the face. Its approach is the builder's choice as long as `blush` at 0 is invisible.
+- **Produces: object split**
+  - Children of `TargetChar`: `TargetBody`, `TargetFace`, `TargetEyes`, `TargetLashes`, `TargetHair`, `TargetBraid`, `TargetTop`, `TargetNeckerchief`, `TargetSkirt`, `TargetSocks`, `TargetShoes`, `TargetAccessories`, `Target-col`
+  - Materials: `M_Hair` gets a highlight band from a UV-v gradient; `M_FaceBlush` is new; the rest are as in Task 8.
+  - Accessories: hair clips on the bows and a collar pin.
+- **Produces: new idle clips** (90–150 frames, looping)
+  - `target_idle_shy`: weight on the left leg, knees slightly together, hands clasped low, head tilted 8° down and to the side
+  - `target_idle_playful`: hip tilt 6°, one heel raised, a light bounce, head tilt 10°
+  - `target_idle_confident`: weight on the right leg, hand on hip, chin slightly up
+
+  Add these to `character_post_import.gd` looping (not one-shot). The Task 9 clips are all re-keyed on the new rig: the same 15 names, plus the skirt and finger keys migrated.
+- **Produces: physics tuning file** `data/secondary_motion.tres` (`class_name SecondaryMotionTuning extends Resource`), consumed by Task 15. It has one entry per chain:
+
+  | Chain | Stiffness | Drag | Gravity | Radius |
+  |---|---|---|---|---|
+  | `braid` | 0.45 | 0.5 | 1.0 | 0.03 |
+  | `ahoge` | 2.0 | 0.15 | 0.1 | 0.01 |
+  | `hair_front` | 1.6 | 0.35 | 0.3 | 0.015 |
+  | `hair_side` | 1.2 | 0.4 | 0.5 | 0.02 |
+  | `neckerchief` | 1.0 | 0.45 | 0.6 | 0.015 |
+  | `sleeve` | 2.5 | 0.6 | 0.2 | 0.03 |
+  | `skirt` | 1.1 | 0.55 | 0.7 | 0.025 |
+  | `braid_bow` | 1.5 | 0.4 | 0.6 | 0.02 |
+
+  Collider capsules are `thigh.L/R` (radius 0.065), `hips` (radius 0.12) and `chest` (radius 0.11), with exact positions derived from the rig.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `validate_assets.py --only target` requires:
+    - the new bone list
+    - the 13 named objects
+    - the exact shape-key set
+    - the 18 action names (15 plus 3 idles)
+    - a skirt with a pleat count of 20, read back from a custom property `pleat_count` on `TargetSkirt`
+  - `test_target_import.gd` asserts:
+    - the `Skeleton3D` has `braid_10`, `skirt_07_03`, `ahoge_03`, `index_03.L`
+    - `TargetFace` has the 15 expression blend shapes
+    - the `AnimationPlayer` has all 18 clips, with the 3 idles looping
+    - `data/secondary_motion.tres` loads with 8 chain entries
+- [ ] **Step 2: Run them.** Expected: FAIL.
+- [ ] **Step 3: Implement the generator changes and rebuild** (CLI + MCP).
+- [ ] **Step 4: Visual pass in Godot.** Render front, 3/4 and back views next to the references, plus all 15 expressions, the 3 idles, a hand close-up and a walk crossfade. Check:
+  - the femboy silhouette reads
+  - fingers are visible
+  - pleats are even
+  - the skirt doesn't clip through the thighs at full walk stride
+  - the blush is visible only when on
+- [ ] **Step 5: Run the validation, import and `run_all.sh`.** Expected: PASS.
+- [ ] **Step 6: Commit** `feat(assets): femboy character upgrade with full secondary rig`.
+
+### Task 9c: He/him text sweep
+
+**Files:**
+- Modify: `data/intel_cards.tres`, `data/items.tres` (if it has pronouns), and any game-facing string in `scripts/` or `data/` that refers to the target as she/her
+- Test: `tests/unit/test_catalogs.gd`
+
+**Interfaces:**
+- **Produces:** every game-facing reference to the target uses he/him/his. Later tasks (19, 20) use he/him in their copy; for example, the game-over text becomes "He told a teacher about you."
+
+- [ ] **Step 1: Write the failing test.** Add `test_intel_text_uses_he_him` to `test_catalogs.gd`. It asserts that no card's `title` or `text` matches the regex `\b([Ss]he|[Hh]er|[Hh]erself)\b`.
+- [ ] **Step 2: Run it.** Expected: FAIL.
+- [ ] **Step 3: Rewrite the card texts**, keeping each one a gentle observational sentence.
+- [ ] **Step 4: Run it.** Expected: PASS.
+- [ ] **Step 5: Commit** `fix(data): use he/him for the target`.
+
 ### Task 10: Player, students and teacher models
 
 **Files:**
@@ -1315,7 +1407,7 @@ The most important visual task. Iterate with blender-mcp `look` until the target
   - `func set_expression(expression: StringName, blend_seconds: float = 0.25) -> void` tweens every `MeshInstance3D` blend shape with that name to 1 and the others to 0. It ignores meshes that lack the shape.
   - Blinks run on a random 2–6 s timer: `blink` 0→1→0 over 0.15 s.
 - **Produces: `class_name SecondaryMotion extends Node`**
-  - Configures a `SpringBoneSimulator3D` under the `Skeleton3D` with chains `braid_01→braid_06` (stiffness 0.6, drag 0.4, gravity 0.8) and `skirt_<side>_01→_02` ×4 (stiffness 1.2, drag 0.6). The skirt chains collide with thigh spheres.
+  - Configures a `SpringBoneSimulator3D` under the `Skeleton3D` with every secondary chain from Task 9b: `braid_01→braid_10`, `braid_bow`, `ahoge_01→03`, `hair_front_*`, `hair_side_*`, `neckerchief_*`, `sleeve_*`, and `skirt_00..07_01→03`. Per-chain values come from `data/secondary_motion.tres` (`SecondaryMotionTuning`). The thigh, hip and chest capsule colliders from that resource are added as `SpringBoneCollisionCapsule3D` nodes. The skirt chains must collide with the thighs.
 - **Produces: `class_name TargetAI extends CharacterBody3D`**
   - `enum State { TRAVEL, ARRIVING, ENTERING, ACTIVITY, LEAVING, MICRO_STOP, NOTICE, SUSPICIOUS, STARTLED, REPORTING, GONE }`
   - Signals:
@@ -1593,7 +1685,7 @@ The most important visual task. Iterate with blender-mcp `look` until the target
   - **`BellBanner`:** a 2.5 s slide-in "♪ Lunch" on `bell_rang`. During class blocks before the player has sat, it reads "Class started — go to 1-A" with a grace countdown.
   - **`ClassFade`:** `func fade_out() -> Signal` and `func fade_in() -> Signal` (0.6 s each). During the fade the clock spins: the label animates from the start time to the end time.
   - **`DaySummary`:** shows the summary dictionary with a Continue button, which calls `GameManager.start_day()` or goes to the ending.
-  - **`GameOverScreen`:** shows the reason (`target_report` → "She told a teacher about you.", `school_alert` → "You've been called to the principal's office.") with Retry Day (`GameManager.retry_day`) and Main Menu buttons.
+  - **`GameOverScreen`:** shows the reason (`target_report` → "He told a teacher about you.", `school_alert` → "You've been called to the principal's office.") with Retry Day (`GameManager.retry_day`) and Main Menu buttons.
   - **`PauseMenu`:** Esc. Resume, Album, Main Menu.
   - **`MainMenu`:** title "Yandere Demo", Continue (disabled unless `GameManager.has_save()`), New Week, Quit. The background is a slow camera orbit of the courtyard in `school_env`.
 

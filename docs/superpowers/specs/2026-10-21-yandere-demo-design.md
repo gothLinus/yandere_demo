@@ -101,6 +101,41 @@ From the references, identically:
 - **Teacher:** adult proportions on the shared rig, in a suit.
 - Supporting characters can be clearly simpler than the target, but they use the same toon look.
 
+### 4.1b Character upgrade (user, 2026-10-21: "femboy" direction, optimized character pass)
+
+This section supersedes §4.1 wherever they conflict.
+
+- **Identity:** the target is a femboy: cute, slim, androgynous, boyish-feminine. Use **he/him** in all game text, data and docs. Wherever this spec says "she/her" for the target, read "he/him".
+- **(user) No glasses**, to match the references.
+- **(user) Godot game only.** Export is glTF. Secondary motion uses Godot's `SpringBoneSimulator3D` with sphere and capsule colliders. **Not in scope:** offline Blender cloth simulation, VRM/FBX export, Rigify, and a T-pose option.
+- **Silhouette:** narrow shoulders, slender neck, gently defined narrow waist, modest hips, flat chest under the uniform, long slim legs with soft knees. Head-to-height ratio 1:6.5–7. Delicate and cute, not muscular, not exaggerated.
+- **Face:** soft rounded jaw, small nose and mouth, large eyes with long lashes, thin soft brows, and a blush option.
+  - **Shape keys** keep the game's five (`neutral`, `startled`, `suspicious`, `happy`, `blink`) and add:
+    - `smile`, `sad`, `blush`
+    - `wink_L`, `wink_R`
+    - `mouth_A`, `mouth_I`, `mouth_U`, `mouth_E`, `mouth_O`
+  - **Eye controls:** pupil size and highlight, via shape keys or material parameters.
+- **Hands and feet:** small, slender, real fingers (thumb + 4 fingers, 3 segments each) instead of mittens. Neat small feet.
+- **Uniform:**
+  - The sailor top sits slightly loose, and the sleeves rest softly on the upper arms.
+  - The pleated skirt is made by a parameterized pleat generator: count 16–24 (default 20), depth, and hem flare. Pleats are even.
+  - Collar and sleeve thickness. A neckerchief with a knot. Hem trim.
+  - Small details: hair clips on the head bows, a thin pin or ribbon on the collar. Thigh-high socks stay.
+  - The modest cut from §4.1 stays: full-length top, knee-length skirt.
+- **Objects and material slots:** body, face, eyes, eyelashes, hair, braid, uniform top, neckerchief, skirt, socks, shoes, accessories.
+- **Shading:** cel shading with a soft rim, an anisotropic-looking hair highlight band, a subtle cheek blush layer, and inverted-hull outlines. All of this is done in Godot's toon shader; Blender materials stay Principled BSDF for export.
+- **Rig:** a humanoid skeleton that keeps the existing bone names, plus secondary chains:
+  - hair clusters (front bangs and sides)
+  - an ahoge (light and bouncy)
+  - the braid, 10 bones (heavier, slower swing)
+  - the braid bow
+  - neckerchief ends
+  - skirt chains, one per pleat group (8 chains × 3 bones)
+  - sleeves
+- **Weights:** automatic weights, then data-transfer and cleanup. Watch the shoulders, armpits, hips and thighs under the skirt.
+- **Physics:** per-chain spring values (stiffness, drag, gravity, radius) are tuned for each part. Thigh and hip capsule colliders sized for the slim build mean the skirt never clips through the legs.
+- **Idle variety:** three idle variants for the target: `target_idle_shy`, `target_idle_playful`, `target_idle_confident`. Each has a weight shift, hip tilt and head tilt. The AI picks among them for standing activities and pauses, which also adds to the target's unpredictability.
+
 ### 4.2 School (user: "like Yandere Sim, a real school"; layout is builder call)
 
 - **Ground floor:**
