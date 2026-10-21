@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"read_bench"
+display_name = "Read on Bench"
+allowed_blocks = Array[StringName]([&"before_school", &"lunch", &"after_school"])
+base_weight = 1.0
+min_minutes = 12.0
+max_minutes = 25.0
+animation = &"target_sit_read"
+posture = 1
+expression = &"neutral"
+is_rare = false
+is_fixed = false
+item_ids = Array[StringName]([&"bookmark"])
+item_drop_chance = 0.3
+intel_card_id = &"intel_read_bench"

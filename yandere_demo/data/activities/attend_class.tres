@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"attend_class"
+display_name = "Attend Class"
+allowed_blocks = Array[StringName]([&"morning_class", &"afternoon_class"])
+base_weight = 0.0
+min_minutes = 0.0
+max_minutes = 0.0
+animation = &"target_sit"
+posture = 1
+expression = &"neutral"
+is_rare = false
+is_fixed = true
+item_ids = Array[StringName]([])
+item_drop_chance = 0.0
+intel_card_id = &""

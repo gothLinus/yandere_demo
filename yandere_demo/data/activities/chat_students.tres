@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"chat_students"
+display_name = "Chat with Students"
+allowed_blocks = Array[StringName]([&"before_school", &"lunch", &"after_school"])
+base_weight = 1.2
+min_minutes = 8.0
+max_minutes = 18.0
+animation = &"target_lean_chat"
+posture = 0
+expression = &"happy"
+is_rare = false
+is_fixed = false
+item_ids = Array[StringName]([&"handkerchief"])
+item_drop_chance = 0.2
+intel_card_id = &"intel_chat_students"

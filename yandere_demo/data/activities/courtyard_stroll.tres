@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"courtyard_stroll"
+display_name = "Courtyard Stroll"
+allowed_blocks = Array[StringName]([&"before_school", &"lunch", &"after_school"])
+base_weight = 0.8
+min_minutes = 6.0
+max_minutes = 12.0
+animation = &"target_walk_routine"
+posture = 0
+expression = &"neutral"
+is_rare = false
+is_fixed = false
+item_ids = Array[StringName]([&"hairpin"])
+item_drop_chance = 0.15
+intel_card_id = &"intel_courtyard_stroll"

@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="ActivityPool" load_steps=16 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_pool.gd" id="1_pool"]
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_def"]
+[ext_resource type="Resource" path="res://data/activities/arrive_locker.tres" id="2_arrive_locker"]
+[ext_resource type="Resource" path="res://data/activities/read_bench.tres" id="3_read_bench"]
+[ext_resource type="Resource" path="res://data/activities/vending_drink.tres" id="4_vending_drink"]
+[ext_resource type="Resource" path="res://data/activities/chat_students.tres" id="5_chat_students"]
+[ext_resource type="Resource" path="res://data/activities/desk_phone.tres" id="6_desk_phone"]
+[ext_resource type="Resource" path="res://data/activities/courtyard_stroll.tres" id="7_courtyard_stroll"]
+[ext_resource type="Resource" path="res://data/activities/restroom_braid.tres" id="8_restroom_braid"]
+[ext_resource type="Resource" path="res://data/activities/rooftop_visit.tres" id="9_rooftop_visit"]
+[ext_resource type="Resource" path="res://data/activities/library_browse.tres" id="10_library_browse"]
+[ext_resource type="Resource" path="res://data/activities/club_activity.tres" id="11_club_activity"]
+[ext_resource type="Resource" path="res://data/activities/attend_class.tres" id="12_attend_class"]
+[ext_resource type="Resource" path="res://data/activities/cleaning_duty.tres" id="13_cleaning_duty"]
+[ext_resource type="Resource" path="res://data/activities/go_home.tres" id="14_go_home"]
+
+[resource]
+script = ExtResource("1_pool")
+activities = Array[ExtResource("1_def")]([ExtResource("2_arrive_locker"), ExtResource("3_read_bench"), ExtResource("4_vending_drink"), ExtResource("5_chat_students"), ExtResource("6_desk_phone"), ExtResource("7_courtyard_stroll"), ExtResource("8_restroom_braid"), ExtResource("9_rooftop_visit"), ExtResource("10_library_browse"), ExtResource("11_club_activity"), ExtResource("12_attend_class"), ExtResource("13_cleaning_duty"), ExtResource("14_go_home")])

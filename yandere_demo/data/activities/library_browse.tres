@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"library_browse"
+display_name = "Browse Library"
+allowed_blocks = Array[StringName]([&"lunch", &"after_school"])
+base_weight = 0.6
+min_minutes = 10.0
+max_minutes = 20.0
+animation = &"target_sit_read"
+posture = 1
+expression = &"neutral"
+is_rare = true
+is_fixed = false
+item_ids = Array[StringName]([&"bookmark", &"note"])
+item_drop_chance = 0.3
+intel_card_id = &"intel_library_browse"

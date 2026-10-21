@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"cleaning_duty"
+display_name = "Cleaning Duty"
+allowed_blocks = Array[StringName]([&"cleaning"])
+base_weight = 0.0
+min_minutes = 0.0
+max_minutes = 0.0
+animation = &"target_sweep"
+posture = 0
+expression = &"neutral"
+is_rare = false
+is_fixed = true
+item_ids = Array[StringName]([])
+item_drop_chance = 0.0
+intel_card_id = &""

@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ActivityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/activity_definition.gd" id="1_definition"]
+
+[resource]
+script = ExtResource("1_definition")
+id = &"desk_phone"
+display_name = "Phone at Desk"
+allowed_blocks = Array[StringName]([&"before_school"])
+base_weight = 0.8
+min_minutes = 8.0
+max_minutes = 15.0
+animation = &"target_phone"
+posture = 1
+expression = &"neutral"
+is_rare = false
+is_fixed = false
+item_ids = Array[StringName]([&"pen"])
+item_drop_chance = 0.2
+intel_card_id = &"intel_desk_phone"
