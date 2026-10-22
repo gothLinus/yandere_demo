@@ -369,3 +369,52 @@ def remove_vertices(mesh_object, predicate) -> None:
     bm.to_mesh(mesh_object.data)
     bm.free()
     mesh_object.data.update()
+
+
+def merge_geometry_with_uvs(parts: list):
+    """Like `merge_geometry`, for (vertices, faces, material_index, vertex_uvs) parts; returns per-corner UVs."""
+    vertices, faces, material_indices, corner_uvs = [], [], [], []
+    for part_vertices, part_faces, material_index, vertex_uvs in parts:
+        offset = len(vertices)
+        vertices.extend(part_vertices)
+        for face in part_faces:
+            faces.append(tuple(index + offset for index in face))
+            material_indices.append(material_index)
+            corner_uvs.extend(vertex_uvs[index] for index in face)
+    return vertices, faces, material_indices, corner_uvs
+
+
+def weight_by_segments(mesh_object, armature, vertex_bones: list, blend: float = 0.02) -> None:
+    """Skin each vertex to its own candidate bones: `vertex_bones[i]` is a list of (bone names, share) pairs.
+
+    Within each pair the share is split over the nearest of those bones by segment distance (blended over
+    `blend` metres). Shares of a vertex are normalised.
+    """
+    segments = {}
+    groups = {}
+    matrix = mesh_object.matrix_world
+    for vertex, candidates in zip(mesh_object.data.vertices, vertex_bones):
+        point = matrix @ vertex.co
+        weights: dict = {}
+        for names, share in candidates:
+            if share <= 1e-5:
+                continue
+            for name in names:
+                if name not in segments:
+                    bone = armature.data.bones[name]
+                    segments[name] = (armature.matrix_world @ bone.head_local, armature.matrix_world @ bone.tail_local)
+            distances = sorted((point_segment_distance(point, *segments[name]), name) for name in names)
+            nearest = distances[0][0]
+            local = {}
+            for distance, name in distances[:3]:
+                if distance - nearest > blend:
+                    break
+                local[name] = 1.0 - (distance - nearest) / blend if blend > 0 else 1.0
+            local_total = sum(local.values())
+            for name, weight in local.items():
+                weights[name] = weights.get(name, 0.0) + share * weight / local_total
+        total = sum(weights.values())
+        for name, weight in weights.items():
+            if name not in groups:
+                groups[name] = mesh_object.vertex_groups.get(name) or mesh_object.vertex_groups.new(name=name)
+            groups[name].add([vertex.index], weight / total, "REPLACE")

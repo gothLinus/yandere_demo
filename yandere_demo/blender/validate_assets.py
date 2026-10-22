@@ -14,11 +14,20 @@ BLENDER_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 if BLENDER_DIRECTORY not in sys.path:
     sys.path.insert(0, BLENDER_DIRECTORY)
 
-from lib.rig import BRAID_BONES, HUMANOID_BONES, SKIRT_BONES  # noqa: E402
-from lib.validate import validate_character  # noqa: E402
+from lib.rig import HUMANOID_BONES, SECONDARY_BONES  # noqa: E402
+from lib.validate import validate_character, validate_target_extras  # noqa: E402
 
-FACE_SHAPE_KEYS = ["neutral", "startled", "suspicious", "happy", "blink"]
-TARGET_MESHES = ["Body", "Head", "Face", "Hair", "Braid", "Bows", "Uniform"]
+# The game's five, the ten from spec 4.1b, and the two eye controls.
+FACE_SHAPE_KEYS = [
+    "neutral", "startled", "suspicious", "happy", "blink",
+    "smile", "sad", "blush", "wink_L", "wink_R", "mouth_A", "mouth_I", "mouth_U", "mouth_E", "mouth_O",
+    "pupil_small", "pupil_large",
+]
+TARGET_MESHES = ["Body", "Face", "Eyes", "Lashes", "Hair", "Braid", "Top", "Neckerchief", "Skirt", "Socks", "Shoes",
+                 "Accessories", "Blush"]
+TARGET_PLEAT_COUNT = 20
+# Standing clips whose every frame must keep the thighs inside the skirt (full walk stride included).
+SKIRT_CLEAR_ACTIONS = ["target_walk_routine", "target_idle", "target_idle_shy", "target_idle_playful", "target_idle_confident"]
 # Action name -> (frame count at 30 fps, loops).
 TARGET_ACTIONS = {
     "target_idle": (90, True),
@@ -36,6 +45,9 @@ TARGET_ACTIONS = {
     "target_lean_chat": (120, True),
     "target_sweep": (60, True),
     "target_wave": (45, True),
+    "target_idle_shy": (120, True),
+    "target_idle_playful": (90, True),
+    "target_idle_confident": (120, True),
 }
 
 CHECKS = {
@@ -44,8 +56,10 @@ CHECKS = {
         "prefix": "Target",
         "shape_keys": FACE_SHAPE_KEYS,
         "actions": TARGET_ACTIONS,
-        "bones": HUMANOID_BONES + BRAID_BONES + SKIRT_BONES,
+        "bones": HUMANOID_BONES + SECONDARY_BONES,
         "meshes": TARGET_MESHES,
+        "pleat_count": TARGET_PLEAT_COUNT,
+        "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
     },
 }
 
@@ -63,7 +77,9 @@ def run_check(check_name: str) -> list[str]:
     if not os.path.exists(blend_path):
         return [f"{check['blend']} does not exist"]
     bpy.ops.wm.open_mainfile(filepath=blend_path)
-    return validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"], check["meshes"])
+    errors = validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"], check["meshes"])
+    return errors + validate_target_extras(check["prefix"], check["shape_keys"], check["pleat_count"],
+                                           check["skirt_clear_actions"])
 
 
 def main() -> int:

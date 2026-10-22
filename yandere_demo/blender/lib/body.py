@@ -2,12 +2,13 @@
 
 from dataclasses import dataclass, field
 
+import bmesh
 import bpy
 from mathutils import Vector
 
 from . import mesh_utils
 from .materials import principled
-from .rig import bone_world_points
+from .rig import FINGERS, bone_world_points
 
 
 @dataclass
@@ -23,6 +24,7 @@ class CharacterParams:
     hair_style: str = "target"
     body_type: str = "female"
     sock_top_fraction: float = 0.405
+    sock_thickness: float = 0.0014
     extra: dict = field(default_factory=dict)
 
 
@@ -31,13 +33,27 @@ BODY_TYPE_SCALES = {
     "female": (1.0, 1.0, 1.0, 1.0),
     "male": (1.08, 1.15, 1.1, 0.92),
     "adult": (1.12, 1.12, 1.12, 1.05),
+    # Spec 4.1b: narrow shoulders, slender neck and limbs, a flat chest, a narrow waist and modest hips.
+    "femboy": (0.93, 0.80, 0.90, 1.06),
 }
 
 BODY_PROPORTIONS = {
     "female": {},
     "male": {"shoulder_x": 0.095, "hip_x": 0.05, "arm_drop_degrees": 64.0},
     "adult": {"head_z": 0.875, "neck_z": 0.83, "shoulder_z": 0.815, "shoulder_x": 0.1, "chest_z": 0.72},
+    # Long slim legs (higher hips and knees), narrow shoulders, slightly wider hip joints.
+    "femboy": {"pelvis_z": 0.600, "spine_z": 0.648, "hip_z": 0.565, "knee_z": 0.303, "shoulder_x": 0.074,
+               "clavicle_x": 0.013, "hip_x": 0.056, "upper_arm_length": 0.150, "forearm_length": 0.136},
 }
+
+# Finger radii at the knuckle and the tip, in metres, before the limb scale.
+FINGER_RADII = {"thumb": (0.0105, 0.0062), "index": (0.0071, 0.0054), "middle": (0.0073, 0.0055),
+                "ring": (0.0069, 0.0052), "pinky": (0.0062, 0.0047)}
+# The Skin modifier drops a junction (leaving loose islands) when branch frames overlap; these were searched
+# so the hand stays one piece with the arm.
+KNUCKLE_HUB_FRACTION = 0.92
+THUMB_BRANCH = "hub"
+HAND_BONE_PREFIXES = ("hand", "forearm") + tuple(f"{finger}_" for finger in FINGERS)
 
 LEG_LABEL = "leg"
 
@@ -74,7 +90,72 @@ def build_body(armature, params: CharacterParams) -> bpy.types.Object:
 
     if not mesh_utils.parent_with_automatic_weights(body, armature):
         print(f"{body.name}: heat weighting failed, used nearest-bone weights")
+    _reweight_hands(body, armature)
     return body
+
+
+def _reweight_hands(body, armature) -> None:
+    """Heat weighting smears small fingers into each other; give every hand vertex clean nearest-bone weights."""
+    hand_bones = [bone.name for bone in armature.data.bones if bone.name.startswith(HAND_BONE_PREFIXES)]
+    segments = {name: bone_world_points(armature, name) for name in hand_bones + ["upper_arm.L", "upper_arm.R"]}
+    groups = {group.name: group for group in body.vertex_groups}
+    for name in hand_bones:
+        if name not in groups:
+            groups[name] = body.vertex_groups.new(name=name)
+    for vertex in body.data.vertices:
+        point = body.matrix_world @ vertex.co
+        distances = sorted((mesh_utils.point_segment_distance(point, *segments[name]), name) for name in segments)
+        nearest_distance, nearest = distances[0]
+        if not nearest.startswith(("hand",) + tuple(f"{finger}_" for finger in FINGERS)) or nearest_distance > 0.03:
+            continue
+        blend = 0.006
+        weights = {}
+        for distance, name in distances[:3]:
+            if distance - nearest_distance > blend or name.startswith("upper_arm"):
+                continue
+            weights[name] = 1.0 - (distance - nearest_distance) / blend
+        total = sum(weights.values())
+        for group in body.vertex_groups:
+            group.remove([vertex.index])
+        for name, weight in weights.items():
+            groups[name].add([vertex.index], weight / total, "REPLACE")
+
+
+def build_socks(body, params: CharacterParams) -> bpy.types.Object:
+    """Split the sock faces off the body into their own slightly thicker mesh; the skin under them is removed,
+    keeping a short overlap band below the sock top so no gap shows."""
+    socks = body.copy()
+    socks.data = body.data.copy()
+    socks.name = f"{params.prefix}Socks"
+    socks.data.name = socks.name
+    bpy.context.scene.collection.objects.link(socks)
+    sock_index = body.data.materials.find("M_Sock")
+    overlap_z = params.sock_top_fraction * params.height - 0.03 * params.height / 1.58
+    bm = bmesh.new()
+    bm.from_mesh(socks.data)
+    bmesh.ops.delete(bm, geom=[face for face in bm.faces if face.material_index != sock_index], context="FACES")
+    bm.normal_update()
+    for vertex in bm.verts:
+        vertex.co += vertex.normal * params.sock_thickness
+    for face in bm.faces:
+        face.material_index = 0
+    bm.to_mesh(socks.data)
+    bm.free()
+    socks.data.materials.clear()
+    socks.data.materials.append(principled("M_Sock", "#f7f5f7", 0.7))
+    mesh_utils.shade_smooth(socks)
+
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    covered = [face for face in bm.faces if face.material_index == sock_index and max(vertex.co.z for vertex in face.verts) < overlap_z]
+    bmesh.ops.delete(bm, geom=covered, context="FACES")
+    for face in bm.faces:
+        face.material_index = 0
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.materials.pop(index=sock_index)
+    body.data.update()
+    return socks
 
 
 def _nearest_label(point: Vector, segments: list) -> str:
@@ -132,17 +213,15 @@ def _skeleton(armature, params: CharacterParams):
         shoulder_head, shoulder_tail = bone(f"shoulder{side}")
         upper_arm_head, elbow = bone(f"upper_arm{side}")
         _, wrist = bone(f"forearm{side}")
-        _, hand_tip = bone(f"fingers{side}")
-        thumb_head, thumb_tail = bone(f"thumb{side}")
+        _, knuckles = bone(f"hand{side}")
         shoulder_joint = add(upper_arm_head + Vector((0, 0, -0.008)), 0.040 * limbs, 0.038 * limbs)
         clavicle = add(shoulder_head.lerp(upper_arm_head, 0.55) + Vector((0, 0, -0.012)), 0.046 * shoulders, 0.044 * torso)
         upper_mid = add(upper_arm_head.lerp(elbow, 0.5), 0.035 * limbs, 0.034 * limbs)
         elbow_point = add(elbow, 0.028 * limbs, 0.027 * limbs)
         forearm_mid = add(elbow.lerp(wrist, 0.42), 0.030 * limbs, 0.027 * limbs)
-        wrist_point = add(wrist, 0.021 * limbs, 0.017 * limbs)
-        palm = add(wrist.lerp(hand_tip, 0.42), 0.030 * limbs, 0.014 * limbs)
-        finger_tip = add(hand_tip, 0.016 * limbs, 0.009 * limbs)
-        thumb_tip = add(thumb_tail, 0.008 * limbs, 0.008 * limbs)
+        wrist_point = add(wrist, 0.019 * limbs, 0.016 * limbs)
+        palm = add(wrist.lerp(knuckles, 0.45), 0.021 * limbs, 0.012 * limbs)
+        knuckle_hub = add(wrist.lerp(knuckles, KNUCKLE_HUB_FRACTION), 0.021 * limbs, 0.0105 * limbs)
         connect(upper_chest, clavicle, "torso")
         connect(clavicle, shoulder_joint, "arm")
         connect(shoulder_joint, upper_mid, "arm")
@@ -150,8 +229,20 @@ def _skeleton(armature, params: CharacterParams):
         connect(elbow_point, forearm_mid, "arm")
         connect(forearm_mid, wrist_point, "arm")
         connect(wrist_point, palm, "hand")
-        connect(palm, finger_tip, "hand")
-        connect(wrist_point, thumb_tip, "hand")
+        connect(palm, knuckle_hub, "hand")
+        for finger in FINGERS:
+            base_radius, tip_radius = FINGER_RADII[finger]
+            previous = {"palm": palm, "wrist": wrist_point, "hub": knuckle_hub}[THUMB_BRANCH] if finger == "thumb" else knuckle_hub
+            for segment in range(1, 4):
+                head, tail = bone(f"{finger}_{segment:02d}{side}")
+                fraction = (segment - 1) / 3
+                radius = (base_radius + (tip_radius - base_radius) * fraction) * limbs
+                joint = add(head, radius, radius)
+                connect(previous, joint, "hand")
+                previous = joint
+                if segment == 3:
+                    tip = add(tail, tip_radius * limbs, tip_radius * limbs)
+                    connect(previous, tip, "hand")
 
         hip_head, knee = bone(f"thigh{side}")
         _, ankle = bone(f"shin{side}")

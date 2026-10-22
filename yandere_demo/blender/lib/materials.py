@@ -6,6 +6,7 @@ import bpy
 
 DEFINITION_PROPERTY = "principled_definition"
 ALPHA_RENDER_METHOD = "DITHERED"
+BLEND_RENDER_METHOD = "BLENDED"
 
 
 def hex_to_srgb(hex_color: str) -> tuple:
@@ -19,7 +20,8 @@ def srgb_to_linear(channel: float) -> float:
     return ((channel + 0.055) / 1.055) ** 2.4
 
 
-def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: str | None = None) -> bpy.types.Material:
+def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: str | None = None,
+               alpha: float = 1.0, texture_alpha: bool = True) -> bpy.types.Material:
     """Return the material `name`, creating it once. `color` is sRGB (r, g, b) or a hex string.
 
     Asking for an existing name with a different color, roughness or texture raises instead of silently
@@ -28,7 +30,7 @@ def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: st
     if isinstance(color, str):
         color = hex_to_srgb(color)
     linear = tuple(srgb_to_linear(channel) for channel in color[:3]) + (1.0,)
-    definition = _definition(linear, roughness, texture_path)
+    definition = _definition(linear, roughness, texture_path, alpha)
     existing = bpy.data.materials.get(name)
     if existing is not None:
         if existing.get(DEFINITION_PROPERTY) != definition:
@@ -44,23 +46,37 @@ def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: st
     material.diffuse_color = linear
     material.roughness = roughness
     if texture_path:
-        _attach_texture(material, shader, texture_path)
+        _attach_texture(material, shader, texture_path, texture_alpha)
+    if alpha < 1.0:
+        # Exported as glTF alphaMode BLEND.
+        shader.inputs["Alpha"].default_value = alpha
+        _set_render_method(material, BLEND_RENDER_METHOD)
     return material
 
 
-def _definition(linear: tuple, roughness: float, texture_path: str | None) -> str:
+def _definition(linear: tuple, roughness: float, texture_path: str | None, alpha: float) -> str:
     rounded = ", ".join(f"{channel:.4f}" for channel in linear[:3])
     texture = os.path.abspath(texture_path) if texture_path else ""
-    return f"color=({rounded}) roughness={roughness:.3f} texture={texture}"
+    suffix = f" alpha={alpha:.3f}" if alpha < 1.0 else ""
+    return f"color=({rounded}) roughness={roughness:.3f} texture={texture}{suffix}"
 
 
-def _attach_texture(material, shader, texture_path: str) -> None:
+def _set_render_method(material, wanted: str) -> None:
+    render_methods = [item.identifier for item in bpy.types.Material.bl_rna.properties["surface_render_method"].enum_items]
+    if wanted not in render_methods:
+        raise ValueError(f"surface_render_method has no {wanted}; available: {render_methods}")
+    material.surface_render_method = wanted
+
+
+def _attach_texture(material, shader, texture_path: str, texture_alpha: bool) -> None:
     image = bpy.data.images.load(os.path.abspath(texture_path), check_existing=True)
     texture_node = material.node_tree.nodes.new("ShaderNodeTexImage")
     texture_node.image = image
     texture_node.location = (shader.location.x - 320, shader.location.y)
     links = material.node_tree.links
     links.new(texture_node.outputs["Color"], shader.inputs["Base Color"])
+    if not texture_alpha:
+        return
     links.new(texture_node.outputs["Alpha"], shader.inputs["Alpha"])
     render_methods = [item.identifier for item in bpy.types.Material.bl_rna.properties["surface_render_method"].enum_items]
     if ALPHA_RENDER_METHOD in render_methods:

@@ -1,8 +1,8 @@
-"""The target's animation library: fifteen in-place clips at 30 fps.
+"""The target's animation library: eighteen in-place clips at 30 fps (fifteen activities plus three idles).
 
 Each clip is a function of the frame that fills a `BodySpec`; the shared `character_animation.compose`
 turns it into a pose (IK feet, IK or FK arms, skirt follow) and `build_target_actions` keys each frame.
-Standing clips start from the target's idle stance and seated clips from her seated stance, so the
+Standing clips start from the target's idle stance and seated clips from his seated stance, so the
 0.3 s crossfades in Godot meet matching poses. Feet are IK-planted, so they never slide.
 """
 
@@ -34,7 +34,7 @@ TARGET_STANCE = Stance(
     seat_height=0.45,
     seat_clearance=0.085,
     # Centre of the M_Mouth strip on TargetFace in the rest pose.
-    mouth=Vector((0.0, -0.074, 1.362)),
+    mouth=Vector((0.0, -0.0738, 1.3968)),
 )
 
 
@@ -237,7 +237,7 @@ def clip_phone(rig: CharacterRig, frame: float) -> BodySpec:
 DRINK_RAISE = Curve([(0, 0.0), (18, 0.0), (36, 1.0), (72, 1.0), (90, 0.0), (120, 0.0)], period=120.0)
 DRINK_TILT = Curve([(0, 0.0), (30, 0.0), (42, 1.0), (62, 1.0), (76, 0.0), (120, 0.0)], period=120.0)
 # The fist sits below and in front of the mouth (where a held can's rim meets the lips), medial enough
-# to clear the braid over her right shoulder. Chest-space offset from the head-carried mouth landmark.
+# to clear the braid over his right shoulder. Chest-space offset from the head-carried mouth landmark.
 DRINK_HAND_FROM_MOUTH = Vector((-0.02, -0.075, -0.075))
 DRINK_GLANCE = Curve([(0, 0.0), (94, 0.0), (104, 6.0), (114, 2.0), (120, 0.0)], period=120.0)
 
@@ -267,53 +267,86 @@ def clip_drink(rig: CharacterRig, frame: float) -> BodySpec:
 
 BRAID_HOLD_LIFT = Curve([(0, 0.0), (22, 1.0), (112, 1.0), (136, 0.0), (150, 0.0)], period=150.0)
 BRAID_REACH = Curve([(0, 0.0), (14, 0.0), (30, 1.0), (124, 1.0), (140, 0.0), (150, 0.0)], period=150.0)
+# Where along the braid (bone index, fraction along that bone) the hands work, and how far the palm centre
+# sits from the wrist along the fingers and off the palm: the braid lies in the hand, not beside it.
+BRAID_CRADLE = ("braid_06", 0.4)
+BRAID_STROKE_TOP = ("braid_04", 0.2)
+BRAID_STROKE_BOTTOM = ("braid_06", 0.1)
+PALM_REACH = 0.058
+PALM_DEPTH = 0.016
+RIGHT_BRAID_AIM = ((0.75, 0.40, 0.25), (0.15, 0.45, 0.88))
+LEFT_BRAID_AIM = ((-0.8, 0.30, -0.45), (-0.30, 0.90, 0.20))
+
+
+def _braid_landmark(rig: CharacterRig, pose, location: tuple) -> Vector:
+    bone, fraction = location
+    skeleton = rig.skeleton
+    point = skeleton.heads[bone].lerp(skeleton.tails[bone], fraction)
+    return rig.landmark(pose, bone, point)
+
+
+def _palm_on(target: Vector, aim: tuple) -> Vector:
+    """Wrist position that puts the palm centre on `target` for a hand aimed by `aim` (chest space)."""
+    fingers = Vector(aim[0]).normalized()
+    palm = Vector(aim[1])
+    palm = (palm - fingers * palm.dot(fingers)).normalized()
+    return target - fingers * PALM_REACH - palm * PALM_DEPTH
+
+
+STROKE = Curve([(0, 0.0), (30, 0.0), (60, 1.0), (68, 0.5), (76, 0.0), (106, 1.0), (131, 1.0), (150, 0.0)], period=150.0)
+# The left hand leaves the braid between strokes (an arc away from it) and on the way back to idle.
+STROKE_AWAY = Curve([(0, 1.0), (14, 1.0), (22, 0.5), (30, 0.0), (60, 0.0), (68, 0.6), (76, 0.0), (106, 0.0),
+                     (122, 0.0), (131, 0.5), (140, 1.0), (150, 1.0)], period=150.0)
 
 
 def fix_braid_curves(rig: CharacterRig) -> dict:
-    # Chest-space braid landmarks: where the right hand cradles it and where the left hand strokes.
-    hold = Vector((-0.115, -0.165, -0.16))
-    top = Vector((-0.08, -0.15, 0.08))
-    bottom = Vector((-0.085, -0.165, -0.08))
-    away = Vector((0.0, -0.05, 0.0))
-    idle_left = rig.idle_wrists[".L"]
-    left_path = Curve([
-        (0, idle_left), (14, idle_left), (22, idle_left.lerp(top, 0.55) + away), (30, top),
-        (60, bottom), (68, top.lerp(bottom, 0.5) + away), (76, top),
-        (106, bottom), (122, bottom), (131, bottom.lerp(idle_left, 0.5) + away), (140, idle_left), (150, idle_left),
-    ], period=150.0)
-    right_path = Curve([(0, rig.idle_wrists[".R"]), (22, hold), (60, hold + Vector((0.0, -0.01, 0.012))),
-                        (106, hold + Vector((0.0, -0.01, 0.012))), (112, hold), (136, rig.idle_wrists[".R"]),
-                        (150, rig.idle_wrists[".R"])], period=150.0)
-    return {"left": left_path, "right": right_path}
+    return {"stroke": STROKE, "away": STROKE_AWAY}
 
 
 def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
     spec = rig.idle_body(frame, 150.0)
     lift = BRAID_HOLD_LIFT.scalar(frame)
     reach = BRAID_REACH.scalar(frame)
+    stroke = curves["stroke"].scalar(frame)
+    away = curves["away"].scalar(frame)
     spec.chest = add_degrees(spec.chest, (2.0 * lift, -1.5 * lift, -4.0 * lift))
     spec.neck = add_degrees(spec.neck, (3.0 * lift, -3.0 * lift, -3.0 * lift))
     spec.head = add_degrees(spec.head, (4.0 * lift, -7.0 * lift, -5.0 * lift))
-    right = spec.arms[".R"]
-    right.wrist = curves["right"].vector(frame)
-    right.pole = rig.idle_poles[".R"].lerp(Vector((-0.8, 0.5, -0.4)), lift)
-    right.aim = ((0.8, 0.45, 0.1), (0.0, 0.4, 0.9))
-    right.aim_weight = lift
-    right.fingers = 18.0 + 30.0 * lift
-    right.thumb = 10.0 + 20.0 * lift
-    left = spec.arms[".L"]
-    left.wrist = curves["left"].vector(frame)
-    left.pole = rig.idle_poles[".L"].lerp(Vector((0.85, -0.2, -0.5)), reach)
-    left.aim = ((-0.8, 0.35, -0.45), (-0.3, 0.9, 0.2))
-    left.aim_weight = reach
-    left.fingers = 18.0 + 10.0 * reach
-    left.thumb = 10.0 + 25.0 * reach
     held = lift * 0.7
+    # The cradling hand lifts the braid forward off the chest.
     spec.extra_rotations = {
         "braid_03": (-3.0 * held, 0.0, 0.0),
         "braid_04": (-6.0 * held, -2.0 * held, 0.0),
         "braid_05": (-3.0 * held, 0.0, 0.0),
     }
+    idle_right = rig.idle_wrists[".R"]
+    idle_left = rig.idle_wrists[".L"]
+
+    def right_wrist(pose) -> Vector:
+        return idle_right.lerp(_palm_on(_braid_landmark(rig, pose, BRAID_CRADLE), RIGHT_BRAID_AIM), lift)
+
+    def left_wrist(pose) -> Vector:
+        top = _braid_landmark(rig, pose, BRAID_STROKE_TOP)
+        bottom = _braid_landmark(rig, pose, BRAID_STROKE_BOTTOM)
+        on_braid = _palm_on(top.lerp(bottom, stroke), LEFT_BRAID_AIM)
+        lifted_off = on_braid + Vector((0.03, -0.05, 0.0)) * math.sin(math.pi * min(1.0, away * 2.0))
+        homeward = max(0.0, away * 2.0 - 1.0)
+        return lifted_off.lerp(idle_left, homeward * homeward * (3.0 - 2.0 * homeward))
+
+    right = spec.arms[".R"]
+    right.wrist = right_wrist
+    right.pole = rig.idle_poles[".R"].lerp(Vector((-0.8, 0.5, -0.4)), lift)
+    right.aim = RIGHT_BRAID_AIM
+    right.aim_weight = lift
+    right.fingers = 18.0 + 40.0 * lift
+    right.thumb = 10.0 + 25.0 * lift
+    left = spec.arms[".L"]
+    left.wrist = left_wrist
+    left.pole = rig.idle_poles[".L"].lerp(Vector((0.85, -0.2, -0.5)), reach)
+    left.aim = LEFT_BRAID_AIM
+    left.aim_weight = reach
+    left.fingers = 18.0 + 30.0 * reach
+    left.thumb = 10.0 + 30.0 * reach
     return spec
 
 
@@ -443,6 +476,100 @@ def clip_wave(rig: CharacterRig, frame: float) -> BodySpec:
     return spec
 
 
+SHY_FEET = {
+    ".L": FootPlacement(0.050, 0.000, -6.0),
+    ".R": FootPlacement(-0.055, -0.020, 10.0),
+}
+
+
+def clip_idle_shy(rig: CharacterRig, frame: float) -> BodySpec:
+    """Weight on the left leg, knees drawn together, hands clasped low, head down and tilted aside."""
+    phase = frame / 120.0
+    sway = math.sin(2.0 * math.pi * phase)
+    fidget = math.sin(2.0 * math.pi * 2.0 * phase)
+    spec = rig.idle_body(frame, 120.0)
+    spec.feet = dict(SHY_FEET)
+    spec.hips_offset = Vector((0.016 + 0.003 * sway, 0.004, -0.022))
+    spec.hips = (1.0, -3.0 + 0.6 * sway, 2.0)
+    spec.spine = (2.0, 2.0, -1.5)
+    spec.chest = (3.0, 1.5 + 0.4 * sway, -1.0)
+    spec.neck = (3.0, 2.0, 2.0)
+    spec.head = (5.0 + 0.8 * fidget, 6.0 + 0.8 * sway, 6.0 + 1.5 * math.sin(2.0 * math.pi * (phase - 0.2)))
+    for side in SIDES:
+        arm = spec.arms[side]
+        arm.shoulder = (0.0, 4.0, -4.0)
+        arm.wrist = Vector((side_sign(side) * 0.018, -0.14 + 0.004 * fidget, -0.265 + side_sign(side) * 0.008))
+        arm.pole = Vector((side_sign(side) * 0.8, 0.5, -0.3))
+        arm.aim = ((-side_sign(side) * 0.55, -0.35, -0.75), (-side_sign(side) * 0.75, 0.55, -0.2))
+        arm.fingers = 35.0 + 4.0 * fidget * side_sign(side)
+        arm.thumb = 25.0
+    spec.skirt_sway = 0.8 * sway
+    return spec
+
+
+PLAYFUL_FEET = {
+    ".L": FootPlacement(0.060, 0.000, 8.0),
+    ".R": FootPlacement(-0.050, 0.070, -14.0, pitch_degrees=30.0),
+}
+
+
+def clip_idle_playful(rig: CharacterRig, frame: float) -> BodySpec:
+    """Hips tilted, the right heel up, hands behind the back, a light bounce and a tilted head."""
+    phase = frame / 90.0
+    bounce = 0.5 - 0.5 * math.cos(2.0 * math.pi * 3.0 * phase)
+    sway = math.sin(2.0 * math.pi * phase)
+    spec = rig.idle_body(frame, 90.0)
+    spec.feet = dict(PLAYFUL_FEET)
+    spec.feet[".R"] = FootPlacement(-0.050, 0.070, -14.0, pitch_degrees=30.0 + 6.0 * bounce)
+    spec.hips_offset = Vector((0.020 + 0.004 * sway, 0.006, -0.018 - 0.008 * bounce))
+    spec.hips = (0.0, 6.0, 3.0 + 2.0 * sway)
+    spec.spine = (-1.0, -3.0, -2.0)
+    spec.chest = (-2.0, -2.0 + 0.8 * sway, -2.0 * sway)
+    spec.neck = (0.0, -3.0, 2.0)
+    spec.head = (1.5 - 1.5 * bounce, -10.0 + 1.5 * sway, 4.0 + 2.0 * sway)
+    for side in SIDES:
+        arm = spec.arms[side]
+        arm.wrist = Vector((side_sign(side) * 0.03, 0.16, -0.275 + 0.006 * bounce))
+        arm.pole = Vector((side_sign(side) * 0.9, 0.2, 0.3))
+        arm.aim = ((-side_sign(side) * 0.6, 0.25, -0.75), (-side_sign(side) * 0.3, 0.9, 0.2))
+        arm.fingers = 30.0
+        arm.thumb = 20.0
+        arm.shoulder = (0.0, 2.0 * bounce, 3.0)
+    spec.skirt_sway = 2.0 * sway
+    return spec
+
+
+CONFIDENT_FEET = {
+    ".L": FootPlacement(0.110, -0.075, 18.0),
+    ".R": FootPlacement(-0.045, 0.005, -9.0),
+}
+
+
+def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
+    """Weight on the right leg, the left hand on the hip, the chin up."""
+    phase = frame / 120.0
+    sway = math.sin(2.0 * math.pi * phase)
+    spec = rig.idle_body(frame, 120.0)
+    spec.feet = dict(CONFIDENT_FEET)
+    spec.hips_offset = Vector((-0.024 + 0.003 * sway, 0.0, -0.02))
+    spec.hips = (0.0, 4.5, -5.0)
+    spec.spine = (-1.5, -2.5, 3.0)
+    spec.chest = (-2.0, -2.0 + 0.5 * sway, 2.0)
+    spec.neck = (-2.0, 1.0, -1.0)
+    spec.head = (-6.0 + 1.0 * sway, 3.0, -4.0 + 2.0 * math.sin(2.0 * math.pi * (phase - 0.3)))
+    left = spec.arms[".L"]
+    left.wrist = Vector((0.150, 0.012, -0.200))
+    left.pole = Vector((0.9, 0.35, 0.1))
+    left.aim = ((-0.25, -0.5, -0.8), (-0.9, 0.2, 0.0))
+    left.fingers, left.thumb = 14.0, 25.0
+    right = spec.arms[".R"]
+    right.adduct = 18.0
+    right.swing = 3.0 + 1.0 * sway
+    right.elbow = 12.0
+    spec.skirt_sway = -1.0 + 0.6 * sway
+    return spec
+
+
 # ---------------------------------------------------------------------------------------------------
 
 def target_clips(rig: CharacterRig) -> list:
@@ -469,8 +596,17 @@ def target_clips(rig: CharacterRig) -> list:
         ("target_lean_chat", 120, True, lambda frame: clip_lean_chat(rig, frame)),
         ("target_sweep", 60, True, lambda frame: clip_sweep(rig, frame)),
         ("target_wave", 45, True, lambda frame: clip_wave(rig, frame)),
+        ("target_idle_shy", 120, True, lambda frame: clip_idle_shy(rig, frame)),
+        ("target_idle_playful", 90, True, lambda frame: clip_idle_playful(rig, frame)),
+        ("target_idle_confident", 120, True, lambda frame: clip_idle_confident(rig, frame)),
     ]
-    return [(name, frame_count, loops, poses_for(rig, frame_count, body)) for name, frame_count, loops, body in clips]
+    skirt_bones = [bone for chain in rig.skeleton.chains(animation.SKIRT_PREFIX) for bone in chain]
+    composed = []
+    for name, frame_count, loops, body in clips:
+        poses = poses_for(rig, frame_count, body)
+        animation.smooth_rotations(poses, skirt_bones, loops)
+        composed.append((name, frame_count, loops, poses))
+    return composed
 
 
 def build_target_actions(armature) -> list:

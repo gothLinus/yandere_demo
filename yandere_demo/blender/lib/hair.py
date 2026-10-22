@@ -1,15 +1,18 @@
 """Anime hair: a scalp cap, layered strand cards (bangs, side and back), the braid and ribbon bows."""
 
 import math
+import os
 import random
+
+import numpy
 
 import bpy
 from mathutils import Matrix, Vector
 
 from . import mesh_utils
 from .face import HEAD_SCALE, head_center
-from .materials import principled
-from .rig import BRAID_BONES, add_chain
+from .materials import hex_to_srgb, principled
+from .rig import BRAID_BONES, BRAID_BOW_BONE, add_bone, add_chain
 
 HAIR_RADII = Vector((0.099, 0.099, 0.116))
 HAIR_BACK_DEPTH = 0.112
@@ -25,7 +28,7 @@ class Strand:
     """One hair lock: follows the hair surface from the crown to `theta_end`, then hangs `hang` metres."""
 
     def __init__(self, phi, theta_end, hang, width, material=HAIR, scale=1.0, flare=0.0, curl=0.0,
-                 tip_bend=0.0, theta_start=8.0, sway=0.0):
+                 tip_bend=0.0, theta_start=8.0, sway=0.0, cluster=None):
         self.phi = phi
         self.theta_end = theta_end
         self.hang = hang
@@ -37,6 +40,8 @@ class Strand:
         self.tip_bend = tip_bend
         self.theta_start = theta_start
         self.sway = sway
+        # Secondary bone chain prefix this lock follows (None: rigid to the head).
+        self.cluster = cluster
 
 
 def surface_point(center: Vector, theta_degrees: float, phi_degrees: float, scale: float = 1.0) -> Vector:
@@ -137,7 +142,9 @@ def _strand_geometry(center: Vector, strand: Strand):
         weight = min(1.0, max(0.0, (center.z - point.z) / 0.05))
         normals.append(surface.lerp(hang_normal, weight).normalized())
     vertices, faces = ribbon(points, widths, normals)
-    return vertices, faces, strand.material
+    # v runs from the root (1) to the tip (0), so glTF's flipped V reads root 0 -> tip 1 in Godot.
+    vertex_uvs = [(across, 1.0 - index / (count - 1)) for index in range(count) for across in (0.0, 0.5, 1.0)]
+    return vertices, faces, strand.material, vertex_uvs
 
 
 def _layout_strands(params, seed: int = 7) -> dict:
@@ -157,12 +164,13 @@ def _layout_strands(params, seed: int = 7) -> dict:
         Strand(49, 97, 0.016, 0.046, scale=1.035, tip_bend=0.004, sway=-3),
         Strand(66, 99, 0.030, 0.050, scale=1.03, tip_bend=0.004, sway=3),
     ]
-    for strand in bangs:
-        strand.theta_start = 12
-        strand.curl = -0.004
     streak = Strand(38, 95, 0.012, 0.034, material=HAIR_STREAK, scale=1.075, theta_start=38, sway=-3)
-    streak.curl = -0.004
     bangs.append(streak)
+    for strand in bangs:
+        if strand is not streak:
+            strand.theta_start = 12
+        strand.curl = -0.004
+        strand.cluster = front_cluster(strand.phi)
     sides = [
         Strand(-78, 96, 0.110, 0.060, scale=1.03, flare=0.010, curl=0.006, tip_bend=0.004),
         Strand(-91, 97, 0.095, 0.068, scale=1.05, flare=0.024, curl=0.010, tip_bend=0.008),
@@ -174,6 +182,8 @@ def _layout_strands(params, seed: int = 7) -> dict:
     for sign in (-1.0, 1.0):
         sides.append(Strand(sign * 60, 97, 0.062, 0.058, scale=1.07, flare=0.026, curl=0.012, tip_bend=0.006, sway=sign * 4))
         sides.append(Strand(sign * 118, 99, 0.075, 0.066, scale=1.075, flare=0.04, curl=0.01, tip_bend=0.02, sway=sign * -5))
+    for strand in sides:
+        strand.cluster = "hair_side_L" if strand.phi > 0 else "hair_side_R"
     back = []
     for index in range(11):
         phi = 112 + index * 13.6 + jitter(3)
@@ -193,36 +203,103 @@ def _layout_strands(params, seed: int = 7) -> dict:
     return {"bangs": bangs, "sides": sides, "back": back, "inner": inner, "crown": crown}
 
 
-def _hair_materials(params) -> list:
+def paint_hair_texture(path: str, params, width: int = 64, height: int = 256) -> bpy.types.Image:
+    """Base colour along a lock (v 1 at the root, 0 at the tip): shade at the roots, the hair colour through the
+    middle, a slightly lighter tip, and faint strand lines across the lock. The shine band is added in Godot."""
+    shade = numpy.array(hex_to_srgb(params.hair_shade_color))
+    base = numpy.array(hex_to_srgb(params.hair_color))
+    tip = base + (numpy.ones(3) - base) * 0.10
+    across = (numpy.arange(width) + 0.5) / width
+    along = 1.0 - (numpy.arange(height) + 0.5) / height
+    across_grid, along_grid = numpy.meshgrid(across, along)
+    root_mix = numpy.clip(along_grid / 0.22, 0.0, 1.0)[..., None]
+    color = shade * (1 - root_mix) + base * root_mix
+    tip_mix = numpy.clip((along_grid - 0.75) / 0.25, 0.0, 1.0)[..., None]
+    color = color * (1 - tip_mix) + tip * tip_mix
+    strands = (0.5 + 0.5 * numpy.cos(2 * numpy.pi * (across_grid * 3.0 + 0.15 * numpy.sin(along_grid * 9.0)))) ** 6
+    color = color * (1.0 - 0.05 * strands[..., None])
+    pixels = numpy.concatenate([numpy.clip(color, 0, 1), numpy.ones((height, width, 1))], axis=-1).astype(numpy.float32)
+    name = os.path.basename(path)
+    image = bpy.data.images.get(name)
+    if image is None:
+        image = bpy.data.images.new(name, width, height, alpha=False)
+    elif tuple(image.size) != (width, height):
+        image.scale(width, height)
+    image.pixels.foreach_set(pixels.ravel())
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    image.filepath_raw = path
+    formats = [item.identifier for item in bpy.types.Image.bl_rna.properties["file_format"].enum_items]
+    image.file_format = next(identifier for identifier in formats if identifier.startswith("PNG"))
+    image.save()
+    return image
+
+
+FRONT_CLUSTER_PHI = 22.0
+# Where along a lock (0 root, 1 tip) its chain takes over from the head, per chain family.
+CLUSTER_TAKEOVER = {"hair_front": 0.45, "hair_side": 0.40, "ahoge": 0.05}
+CLUSTER_BLEND = 0.3
+
+
+def front_cluster(phi: float) -> str:
+    if phi > FRONT_CLUSTER_PHI:
+        return "hair_front_L"
+    if phi < -FRONT_CLUSTER_PHI:
+        return "hair_front_R"
+    return "hair_front_C"
+
+
+def _hair_materials(params, hair_texture_path: str | None = None) -> list:
     return [
-        principled("M_Hair", params.hair_color, 0.5),
+        principled("M_Hair", "#ffffff" if hair_texture_path else params.hair_color, 0.5, hair_texture_path,
+                   texture_alpha=False),
         principled("M_HairShade", params.hair_shade_color, 0.5),
         principled("M_HairStreak", params.hair_streak_color, 0.5),
     ]
 
 
-def _strands_object(name: str, center: Vector, strands: list, params) -> bpy.types.Object:
+def _strands_object(name: str, center: Vector, strands: list, params, armature) -> bpy.types.Object:
     parts = [_strand_geometry(center, strand) for strand in strands]
-    vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
-    hair_object = mesh_utils.mesh_from_geometry(name, vertices, faces, _hair_materials(params), material_indices)
+    vertices, faces, material_indices, uvs = mesh_utils.merge_geometry_with_uvs(parts)
+    hair_object = mesh_utils.mesh_from_geometry(name, vertices, faces, _hair_materials(params, params.extra.get("hair_texture")),
+                                                material_indices, uvs)
+    vertex_bones = []
+    for strand, part in zip(strands, parts):
+        for _, along in part[3]:
+            vertex_bones.append(_lock_bones(armature, strand.cluster, 1.0 - along))
+    # Solidify copies the vertex groups onto the inner shell.
+    mesh_utils.weight_by_segments(hair_object, armature, vertex_bones)
     mesh_utils.add_modifier(hair_object, "SOLIDIFY", thickness=STRAND_THICKNESS, offset=-1.0, use_even_offset=True)
     mesh_utils.apply_modifiers(hair_object)
     mesh_utils.recalculate_normals(hair_object)
     return hair_object
 
 
+def _lock_bones(armature, cluster: str | None, along: float) -> list:
+    """(bones, share) pairs for a hair vertex `along` its lock: the head holds the root, the chain the rest."""
+    if cluster is None:
+        return [(["head"], 1.0)]
+    family = cluster.rsplit("_", 1)[0] if cluster.startswith("hair_") else cluster
+    takeover = CLUSTER_TAKEOVER[family]
+    chain = [bone.name for bone in armature.data.bones if bone.name.startswith(cluster + "_")]
+    share = min(1.0, max(0.0, (along - takeover) / CLUSTER_BLEND))
+    return [(["head"], 1.0 - share), (chain, share)]
+
+
 def build_bangs(head, params) -> bpy.types.Object:
-    center = head_center(head.parent)
+    armature = head.parent
+    center = head_center(armature)
     layout = _layout_strands(params)
-    bangs = _strands_object(f"{params.prefix}Bangs", center, layout["bangs"] + layout["crown"], params)
-    ahoge = _ahoge(center, params)
+    bangs = _strands_object(f"{params.prefix}Bangs", center, layout["bangs"] + layout["crown"], params, armature)
+    ahoge = _ahoge(center, params, armature)
     return mesh_utils.join_objects(f"{params.prefix}Bangs", [bangs, ahoge])
 
 
 def build_side_hair(head, params) -> bpy.types.Object:
-    center = head_center(head.parent)
+    armature = head.parent
+    center = head_center(armature)
     layout = _layout_strands(params)
-    return _strands_object(f"{params.prefix}SideHair", center, layout["sides"] + layout["back"] + layout["inner"], params)
+    return _strands_object(f"{params.prefix}SideHair", center, layout["sides"] + layout["back"] + layout["inner"], params,
+                           armature)
 
 
 def build_hair_cap(head, params) -> bpy.types.Object:
@@ -238,7 +315,9 @@ def build_hair_cap(head, params) -> bpy.types.Object:
             ring.append(point)
         rings.append(ring)
     vertices, faces = mesh_utils.loft(rings)
-    cap = mesh_utils.mesh_from_geometry(f"{params.prefix}HairCap", vertices, faces, _hair_materials(params), [HAIR_SHADE] * len(faces))
+    cap = mesh_utils.mesh_from_geometry(f"{params.prefix}HairCap", vertices, faces, _hair_materials(params, params.extra.get("hair_texture")),
+                                        [HAIR_SHADE] * len(faces), [(0.5, 1.0)] * sum(len(face) for face in faces))
+    cap.vertex_groups.new(name="head").add(range(len(cap.data.vertices)), 1.0, "REPLACE")
     mesh_utils.recalculate_normals(cap)
     mesh_utils.add_modifier(cap, "SUBSURF", levels=1, render_levels=1)
     mesh_utils.apply_modifiers(cap)
@@ -250,11 +329,17 @@ def _hairline_theta(phi: float) -> float:
     return 72 + 40 * behind ** 1.5
 
 
-def _ahoge(center: Vector, params) -> bpy.types.Object:
+AHOGE_OFFSETS = [(0, 0, 0), (0.004, -0.004, 0.02), (0.010, -0.012, 0.042), (0.016, -0.028, 0.052), (0.020, -0.044, 0.046),
+                 (0.022, -0.052, 0.034)]
+
+
+def ahoge_points(center: Vector, count: int) -> list:
     root = surface_point(center, 14, 12, 1.05)
-    offsets = [(0, 0, 0), (0.004, -0.004, 0.02), (0.010, -0.012, 0.042), (0.016, -0.028, 0.052), (0.020, -0.044, 0.046), (0.022, -0.052, 0.034)]
-    points = [root + Vector(offset) * HEAD_SCALE for offset in offsets]
-    points = _resample(points, 10)
+    return _resample([root + Vector(offset) * HEAD_SCALE for offset in AHOGE_OFFSETS], count)
+
+
+def _ahoge(center: Vector, params, armature) -> bpy.types.Object:
+    points = ahoge_points(center, 10)
     widths = [0.012 * (1.0 - index / 10) ** 0.8 + 0.001 for index in range(11)]
     normals = []
     for index, point in enumerate(points):
@@ -263,7 +348,12 @@ def _ahoge(center: Vector, params) -> bpy.types.Object:
         tangent = (following - previous).normalized()
         normals.append(tangent.cross(Vector((1, 0, 0))).normalized() * -1)
     vertices, faces = ribbon(points, widths, normals, arch=0.15)
-    ahoge = mesh_utils.mesh_from_geometry(f"{params.prefix}Ahoge", vertices, faces, _hair_materials(params), [HAIR] * len(faces))
+    vertex_uvs = [(across, 1.0 - index / 10) for index in range(11) for across in (0.0, 0.5, 1.0)]
+    uvs = [vertex_uvs[index] for face in faces for index in face]
+    ahoge = mesh_utils.mesh_from_geometry(f"{params.prefix}Ahoge", vertices, faces,
+                                          _hair_materials(params, params.extra.get("hair_texture")), [HAIR] * len(faces), uvs)
+    mesh_utils.weight_by_segments(ahoge, armature, [_lock_bones(armature, "ahoge", index / 10)
+                                                    for index in range(11) for _ in range(3)])
     mesh_utils.add_modifier(ahoge, "SOLIDIFY", thickness=0.003, offset=0.0)
     mesh_utils.apply_modifiers(ahoge)
     return ahoge
@@ -273,8 +363,23 @@ def build_hair(head, armature, params) -> bpy.types.Object:
     parts = [build_hair_cap(head, params), build_bangs(head, params), build_side_hair(head, params)]
     hair_object = mesh_utils.join_objects(f"{params.prefix}Hair", parts)
     mesh_utils.shade_smooth(hair_object)
-    mesh_utils.assign_single_bone(hair_object, armature, "head")
+    mesh_utils.parent_to_armature(hair_object, armature)
     return hair_object
+
+
+def add_hair_chains(armature, params) -> list:
+    """Bone chains for the ahoge, the three bang clusters and the two side locks, laid along their locks."""
+    center = head_center(armature)
+    names = []
+    ahoge = ahoge_points(center, 9)
+    names += add_chain(armature, "ahoge", "head", [ahoge[0], ahoge[3], ahoge[6], ahoge[9]])
+    for cluster, phi in (("L", 40.0), ("C", 2.0), ("R", -40.0)):
+        path = _strand_path(center, Strand(phi, 97, 0.014, 0.04, scale=1.05, theta_start=12))
+        names += add_chain(armature, f"hair_front_{cluster}", "head", [path[6], path[10], path[-1]])
+    for cluster, sign in (("L", 1.0), ("R", -1.0)):
+        path = _strand_path(center, Strand(sign * 90, 97, 0.095, 0.068, scale=1.05, flare=0.024, curl=0.010))
+        names += add_chain(armature, f"hair_side_{cluster}", "head", [path[6], path[9], path[12], path[-1]])
+    return names
 
 
 def braid_points(armature, params) -> list:
@@ -291,8 +396,16 @@ def braid_points(armature, params) -> list:
     ]
 
 
+BRAID_BOW_LENGTH = 0.06
+
+
 def add_braid_chain(armature, params) -> list:
-    return add_chain(armature, "braid", "head", braid_points(armature, params))
+    """`braid_01..10` along the plait, then `braid_bow` from the tie down along the tuft."""
+    curve = _braid_curve(armature, params, len(BRAID_BONES))
+    names = add_chain(armature, "braid", "head", curve)
+    tangent = (curve[-1] - curve[-2]).normalized()
+    names.append(add_bone(armature, BRAID_BOW_BONE, curve[-1], curve[-1] + tangent * BRAID_BOW_LENGTH, names[-1]))
+    return names
 
 
 def _braid_curve(armature, params, samples: int) -> list:
@@ -344,16 +457,22 @@ def build_braid(armature, params) -> bpy.types.Object:
             pinch = 1.0 - 0.45 * along * along
             local = Vector((vertex.x * pinch, vertex.y * (0.75 + 0.25 * pinch), vertex.z))
             shaped.append(lobe_center + rotation @ local)
-        parts.append((shaped, faces, 0 if lobe % 2 == 0 else 1))
+        # Each lobe runs root (top, v 1) to tip (v 0) like a lock, so the highlight band crosses every plait.
+        lobe_uvs = [(0.5, 0.5 + vertex.z / 0.084) for vertex in vertices]
+        parts.append((shaped, faces, 0 if lobe % 2 == 0 else 1, lobe_uvs))
     core_vertices, core_faces = _braid_core(curve)
-    parts.append((core_vertices, core_faces, 1))
-    parts += _braid_tuft(curve[-1], frames[-1][0])
-    vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
-    braid = mesh_utils.mesh_from_geometry(f"{params.prefix}Braid", vertices, faces, _hair_materials(params), material_indices)
+    parts.append((core_vertices, core_faces, 1, [(0.5, 1.0)] * len(core_vertices)))
+    for tuft_vertices, tuft_faces, material_index in _braid_tuft(curve[-1], frames[-1][0]):
+        count = len(tuft_vertices) // 3
+        parts.append((tuft_vertices, tuft_faces, material_index,
+                      [(across, 1.0 - index / max(1, count - 1)) for index in range(count) for across in (0.0, 0.5, 1.0)]))
+    vertices, faces, material_indices, uvs = mesh_utils.merge_geometry_with_uvs(parts)
+    braid = mesh_utils.mesh_from_geometry(f"{params.prefix}Braid", vertices, faces,
+                                          _hair_materials(params, params.extra.get("hair_texture")), material_indices, uvs)
     mesh_utils.recalculate_normals(braid)
     mesh_utils.add_modifier(braid, "SUBSURF", levels=1, render_levels=1)
     mesh_utils.apply_modifiers(braid)
-    mesh_utils.assign_nearest_bone_weights(braid, armature, ["head"] + BRAID_BONES, blend=0.05)
+    mesh_utils.assign_nearest_bone_weights(braid, armature, ["head"] + BRAID_BONES + [BRAID_BOW_BONE], blend=0.05)
     return braid
 
 
@@ -445,29 +564,30 @@ def _bow_tail(origin: Vector, outward_axis: Vector, up: Vector, normal: Vector, 
     return vertices, faces, 0
 
 
-def build_bows(params, armature) -> bpy.types.Object:
+HEAD_BOW_PHI = 114.0
+
+
+def head_bow_frames(armature) -> list:
+    """(origin, facing, up hint) of the two head bows on the upper back sides, lying flat on the hair."""
     center = head_center(armature)
-    parts = []
-    # Upper back sides of the head, lying flat on the hair like the references' ribbons.
-    for phi in (-114.0, 114.0):
+    frames = []
+    for phi in (-HEAD_BOW_PHI, HEAD_BOW_PHI):
         origin = surface_point(center, 55, phi, 1.16)
         normal = surface_normal(center, origin)
-        facing = (normal + Vector((0, 0.3, 0))).normalized()
-        parts += bow_geometry(origin, facing, Vector((0, -0.25, 1)), 1.6 * HEAD_SCALE)
+        frames.append((origin, (normal + Vector((0, 0.3, 0))).normalized(), Vector((0, -0.25, 1))))
+    return frames
+
+
+def bow_parts(params, armature) -> tuple[list, list]:
+    """Geometry of the two head bows and the braid-tip bow, as (head parts, braid parts)."""
+    head_parts = []
+    for origin, facing, up_hint in head_bow_frames(armature):
+        head_parts += bow_geometry(origin, facing, up_hint, 1.6 * HEAD_SCALE)
     curve = _braid_curve(armature, params, 40)
     tip = curve[-1]
     tangent = (curve[-1] - curve[-3]).normalized()
-    parts += bow_geometry(tip + Vector((0, -0.022, 0.004)), Vector((0.1, -1.0, 0.05)), -tangent, 1.5)
-    vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
-    bows = mesh_utils.mesh_from_geometry(f"{params.prefix}Bows", vertices, faces, [principled("M_Bow", "#1d151b", 0.35)], material_indices)
-    mesh_utils.recalculate_normals(bows)
-    braid_tip = tip
-    head_vertices = [vertex.index for vertex in bows.data.vertices if (vertex.co - braid_tip).length > 0.12]
-    braid_vertices = [vertex.index for vertex in bows.data.vertices if (vertex.co - braid_tip).length <= 0.12]
-    bows.vertex_groups.new(name="head").add(head_vertices, 1.0, "REPLACE")
-    bows.vertex_groups.new(name=BRAID_BONES[-1]).add(braid_vertices, 1.0, "REPLACE")
-    mesh_utils.parent_to_armature(bows, armature)
-    return bows
+    braid_parts = bow_geometry(tip + Vector((0, -0.022, 0.004)), Vector((0.1, -1.0, 0.05)), -tangent, 1.5)
+    return head_parts, braid_parts
 
 
 def build_ponytail(*arguments, **keywords):

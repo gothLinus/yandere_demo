@@ -2,8 +2,8 @@
 extends EditorScenePostImport
 
 # Bangs sit a few centimetres in front of the face; their cast shadow would cut a hard band across it.
-# Matches TargetHair, Hair_bob, TargetBows, Bow_left and similar names.
-const SHADOWLESS_NAME_PARTS: Array[String] = ["Hair", "Bow"]
+# The blush is a transparent overlay. Matches TargetHair, Hair_bob, Bow_left, TargetBlush and similar names.
+const SHADOWLESS_NAME_PARTS: Array[String] = ["Hair", "Bow", "Blush"]
 # Every other imported clip loops; glTF carries no loop flag.
 const ONE_SHOT_ANIMATIONS: Array[StringName] = [
 	&"target_notice_player",

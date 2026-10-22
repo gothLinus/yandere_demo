@@ -3,6 +3,10 @@ extends RefCounted
 
 const TOON_SHADER: Shader = preload("res://assets/shaders/toon.gdshader")
 const OUTLINE_SHADER: Shader = preload("res://assets/shaders/outline.gdshader")
+const BLUSH_SHADER: Shader = preload("res://assets/shaders/toon_blush.gdshader")
+const BLUSH_MATERIAL_NAME: String = "M_FaceBlush"
+# Exact names: M_HairShade (the dark under-layer) and M_HairClip (metal) get no shine band.
+const HAIR_BAND_MATERIALS: Array[String] = ["M_Hair", "M_HairStreak"]
 const PROXY_MATERIAL_NAME: String = "M_CollisionProxy"
 const CHARACTER_NO_OUTLINE_PREFIXES: Array[String] = ["M_Eye", "M_Face", "M_Mouth"]
 const ENVIRONMENT_OUTLINE_PREFIXES: Array[String] = ["M_Prop"]
@@ -65,11 +69,16 @@ static func _convert_instance(instance: MeshInstance3D, outline_width: float, wa
 static func _make_toon_material(source: BaseMaterial3D) -> ShaderMaterial:
 	var material: ShaderMaterial = ShaderMaterial.new()
 	material.resource_name = source.resource_name
-	material.shader = TOON_SHADER
 	material.set_shader_parameter("albedo_color", source.albedo_color)
+	if source.resource_name == BLUSH_MATERIAL_NAME:
+		material.shader = BLUSH_SHADER
+		return material
+	material.shader = TOON_SHADER
 	if source.albedo_texture != null:
 		material.set_shader_parameter("albedo_texture", source.albedo_texture)
 		material.set_shader_parameter("use_texture", true)
+	if HAIR_BAND_MATERIALS.has(source.resource_name):
+		material.set_shader_parameter("use_hair_band", true)
 	return material
 
 

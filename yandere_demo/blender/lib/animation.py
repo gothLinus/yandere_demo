@@ -405,17 +405,23 @@ def aim_hand(skeleton: Skeleton, pose: Pose, side: str, finger_direction, palm_d
     share_twist(skeleton, pose, f"forearm{side}", f"hand{side}", twist_share)
 
 
-def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: float, thumb_degrees: float) -> None:
-    """Curl every finger chain under the hand toward the palm, sharing the angle evenly over its segments.
+FINGER_CHAIN_PREFIXES = ("thumb_", "index_", "middle_", "ring_", "pinky_")
 
-    Chains whose root name contains "thumb" take `thumb_degrees` and curl across the palm; all others take
-    `fingers_degrees`. A single-bone finger is the one-segment case.
+
+def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: float, thumb_degrees: float) -> None:
+    """Curl the finger chains under the hand toward the palm, sharing the angle evenly over their segments.
+
+    Only chains named like fingers (`FINGER_CHAIN_PREFIXES`) curl, so props or attachment bones parented to
+    the hand are left alone. The thumb takes `thumb_degrees` and curls across the palm; the others take
+    `fingers_degrees`.
     """
     hand = f"hand{side}"
     palm = palm_normal(skeleton, side)
     across_palm = palm + skeleton.direction(hand) * 0.5
     for chain in skeleton.chains_under(hand):
-        is_thumb = "thumb" in chain[0]
+        if not chain[0].startswith(FINGER_CHAIN_PREFIXES):
+            continue
+        is_thumb = chain[0].startswith("thumb_")
         angle = (thumb_degrees if is_thumb else fingers_degrees) / len(chain)
         for bone in chain:
             pose.rotations[bone] = Quaternion()
@@ -457,6 +463,12 @@ def _skirt_facing(skeleton: Skeleton, chain: list) -> tuple[Vector, dict]:
 def _tip_swing(toward_back: float, toward_left: float) -> Quaternion:
     """Rest-axis rotation that swings a hanging bone's tip by degrees toward +Y and toward +X."""
     return degrees(x=toward_back, y=-toward_left)
+
+
+# Seated, the sat-on back panels hang just past the buttocks and their lower segments fold forward under them
+# (hidden between body and seat) instead of trailing behind the seat.
+SEATED_BACK_HANG = 12.0
+SEATED_BACK_TUCK = 70.0
 
 
 def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seated: float | None = None) -> None:
@@ -506,12 +518,12 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
         _, share = _skirt_facing(skeleton, chain)
         sides = share[".L"] + share[".R"]
         # Seated, the back panel angles down past the buttocks and the sides drape forward over the thighs.
-        root_back = (share["back"] * (back + 34.0 * seated + hang)
+        root_back = (share["back"] * (back + SEATED_BACK_HANG * seated + hang)
                      - share["front"] * front * (1.0 - 0.15 * seated)
                      + sum(share[side] * (side_hang - lifts[side] - 12.0 * seated) for side in SIDES))
         root_left = sway_degrees + sum(share[side] * side_sign(side) * (spreads[side] - 6.0 * seated) for side in SIDES)
         follow_back = (share["front"] * ((droop - front * 0.18) * (1.0 - seated) + 24.0 * seated)
-                       + share["back"] * (back * 0.25 + 30.0 * seated) - sides * 6.0 * seated)
+                       + share["back"] * (back * 0.25 - SEATED_BACK_TUCK * seated) - sides * 6.0 * seated)
         follow_left = sum(share[side] * (side_sign(side) * spreads[side] * 0.2 + sway_degrees * 0.4) for side in SIDES)
         segments = len(chain) - 1
         pose.rotations[chain[0]] = _tip_swing(root_back, root_left)
@@ -523,6 +535,195 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
             follow_scale = (1.0 - 0.35 * seated * share["back"]) ** (1.0 / max(1, segments))
             for bone in chain[1:]:
                 pose.scales[bone] = Vector((1.0, follow_scale, 1.0))
+    clear_legs(skeleton, pose, chains)
+
+
+# Leg capsules the skirt keeps clear of: radius at the hip, at the knee, and how far down the shin the knee cap
+# reaches (fraction of the shin). The margin covers the pleat depth and the fabric thickness.
+THIGH_RADII = (0.064, 0.044)
+THIGH_START = 0.2
+# A bent knee juts out (kneecap and the skin bulge over the joint) past the straight-leg thigh radius.
+KNEE_RADIUS = 0.062
+SHIN_REACH = 0.25
+SKIRT_LEG_MARGIN = 0.012
+# Each chain carries the fabric halfway to its neighbours, so it checks that whole sector.
+SKIRT_SECTOR_SHARES = (0.0, 0.25, 0.5)
+MAX_CLEARANCE_DEGREES = 80.0
+SKIRT_SMOOTHING_PASSES = 3
+
+
+def _leg_capsules(skeleton: Skeleton, world: dict, heads: dict) -> list:
+    capsules = []
+    for side in SIDES:
+        hip = heads[f"thigh{side}"]
+        knee = heads[f"shin{side}"]
+        ankle = heads[f"foot{side}"]
+        # The top of the thigh sits inside the pelvis, under the waistband the chains pivot on.
+        capsules.append((hip.lerp(knee, THIGH_START), knee, THIGH_RADII[0], THIGH_RADII[1]))
+        capsules.append((knee, knee, KNEE_RADIUS, KNEE_RADIUS))
+        capsules.append((knee, knee.lerp(ankle, SHIN_REACH), THIGH_RADII[1], THIGH_RADII[1] * 0.9))
+    return capsules
+
+
+def _capsule_clearance(point: Vector, capsule: tuple) -> float:
+    start, end, start_radius, end_radius = capsule
+    segment = end - start
+    fraction = max(0.0, min(1.0, (point - start).dot(segment) / max(segment.length_squared, 1e-12)))
+    return (point - (start + segment * fraction)).length - lerp(start_radius, end_radius, fraction)
+
+
+def _chain_points(skeleton: Skeleton, world: dict, heads: dict, chain: list) -> list:
+    """Joints and segment midpoints of a chain, skipping the pinned waistband."""
+    joints = [heads[bone] for bone in chain[1:]] + [tail_position(skeleton, world, heads, chain[-1])]
+    points = [joints[0]]
+    for previous, point in zip(joints, joints[1:]):
+        points += [previous.lerp(point, 0.5), point]
+    return points
+
+
+def _sector_pairs(skeleton: Skeleton, world: dict, heads: dict, chains: list, index: int) -> list:
+    """(own point, neighbour point, share of the neighbour) samples across a chain's sector.
+
+    Vertices between two chains are skinned to both by azimuth, so a point halfway to a neighbour moves half as
+    far as the chain does; the samples model exactly that.
+    """
+    own = _chain_points(skeleton, world, heads, chains[index])
+    pairs = []
+    for neighbour_index in ((index - 1) % len(chains), (index + 1) % len(chains)):
+        neighbour = _chain_points(skeleton, world, heads, chains[neighbour_index])
+        for share in SKIRT_SECTOR_SHARES:
+            pairs += [(point, other, share) for point, other in zip(own, neighbour)]
+    return pairs
+
+
+def _sector_clearance(pairs: list, pivot: Vector, turn: Quaternion, capsules: list) -> float:
+    worst = math.inf
+    for point, other, share in pairs:
+        moved = pivot + turn @ (point - pivot)
+        sample = moved.lerp(other, share)
+        for capsule in capsules:
+            worst = min(worst, _capsule_clearance(sample, capsule))
+    return worst
+
+
+def _rest_clearances(skeleton: Skeleton, chains: list) -> dict:
+    key = ("rest_clearance", tuple(chain[0] for chain in chains))
+    if key not in skeleton._chains:
+        world, heads = forward_kinematics(skeleton, Pose())
+        capsules = _leg_capsules(skeleton, world, heads)
+        skeleton._chains[key] = {
+            chain[0]: _sector_clearance(_sector_pairs(skeleton, world, heads, chains, index), heads[chain[0]],
+                                        Quaternion(), capsules)
+            for index, chain in enumerate(chains)
+        }
+    return skeleton._chains[key]
+
+
+def _drape_segments(skeleton: Skeleton, pose: Pose, chains: list, index: int, axis: Vector, lifted: float,
+                    margin: float, capsules: list) -> None:
+    """After the root lifted a chain by `lifted` degrees, let each lower segment fall back toward hanging as far
+    as the legs allow, so the fabric drapes over a thigh and down its side instead of sticking out like a shelf."""
+    chain = chains[index]
+    remaining = lifted
+    for segment_index in range(1, len(chain)):
+        world, heads = forward_kinematics(skeleton, pose)
+        bone = chain[segment_index]
+        pivot = heads[bone]
+        pairs = [pair for pair in _sector_pairs(skeleton, world, heads, chains, index)
+                 if (pair[0] - heads[chain[0]]).length >= (pivot - heads[chain[0]]).length - 1e-6]
+
+        def clearance(angle: float) -> float:
+            return _sector_clearance(pairs, pivot, Quaternion(axis, math.radians(-angle)), capsules)
+
+        if remaining <= 0.0 or clearance(0.0) < margin:
+            break
+        low, high = 0.0, remaining
+        if clearance(high) >= margin:
+            low = high
+        else:
+            for _ in range(12):
+                middle = 0.5 * (low + high)
+                if clearance(middle) >= margin:
+                    low = middle
+                else:
+                    high = middle
+        if low <= 0.0:
+            break
+        set_world_rotation(skeleton, pose, bone, Quaternion(axis, math.radians(-low)) @ world[bone])
+        remaining -= low
+
+
+def clear_legs(skeleton: Skeleton, pose: Pose, chains: list) -> None:
+    """Swing each skirt chain outward just far enough that its whole sector stays outside the legs.
+
+    This bakes into the keys what the spring-bone colliders do at runtime: a striding or raised thigh lifts the
+    panels in front of it instead of pushing through them. Chains that already clear are left untouched.
+    """
+    rest_clearance = _rest_clearances(skeleton, chains)
+    world, heads = forward_kinematics(skeleton, pose)
+    capsules = _leg_capsules(skeleton, world, heads)
+    up = world["hips"] @ UP
+    center = heads["hips"]
+    for index, chain in enumerate(chains):
+        pivot = heads[chain[0]]
+        pairs = _sector_pairs(skeleton, world, heads, chains, index)
+        # The fabric only has to keep the clearance it has hanging at rest.
+        margin = min(SKIRT_LEG_MARGIN, rest_clearance[chain[0]])
+        hem = tail_position(skeleton, world, heads, chain[-1]) - center
+        outward = hem - up * hem.dot(up)
+        if outward.length < 1e-6:
+            continue
+        axis = outward.normalized().cross(up)
+
+        def worst(angle: float) -> float:
+            return _sector_clearance(pairs, pivot, Quaternion(axis, math.radians(angle)), capsules)
+
+        if worst(0.0) >= margin:
+            continue
+        low, high = 0.0, MAX_CLEARANCE_DEGREES
+        if worst(high) < margin:
+            low = high
+        else:
+            for _ in range(14):
+                middle = 0.5 * (low + high)
+                if worst(middle) >= margin:
+                    high = middle
+                else:
+                    low = middle
+            low = high
+        set_world_rotation(skeleton, pose, chain[0], Quaternion(axis, math.radians(low)) @ world[chain[0]])
+        world, heads = forward_kinematics(skeleton, pose)
+        _drape_segments(skeleton, pose, chains, index, axis, low, margin, capsules)
+        world, heads = forward_kinematics(skeleton, pose)
+
+
+def smooth_rotations(poses: list, bones: list, loop: bool, passes: int = SKIRT_SMOOTHING_PASSES) -> None:
+    """Low-pass the rotation keys of `bones` over time ([1, 2, 1] per pass, wrapping for loops).
+
+    The skirt follow and the leg clearance switch on and off with the legs, which leaves velocity kinks that
+    read as pops (and kick the spring bones at runtime); a light temporal blur removes them.
+    """
+    count = len(poses) - 1 if loop else len(poses)
+    for _ in range(passes):
+        for bone in bones:
+            current = [poses[frame].rotation(bone) for frame in range(count)]
+            smoothed = []
+            for frame in range(count):
+                if loop:
+                    before, after = current[frame - 1], current[(frame + 1) % count]
+                else:
+                    before, after = current[max(0, frame - 1)], current[min(count - 1, frame + 1)]
+                middle = current[frame]
+                total = Quaternion((0.0, 0.0, 0.0, 0.0))
+                for weight, rotation in ((1.0, before), (2.0, middle), (1.0, after)):
+                    aligned = rotation if rotation.dot(middle) >= 0.0 else -rotation
+                    total = Quaternion([total[index] + weight * aligned[index] for index in range(4)])
+                smoothed.append(total.normalized())
+            for frame in range(count):
+                poses[frame].rotations[bone] = smoothed[frame]
+    if loop:
+        for bone in bones:
+            poses[-1].rotations[bone] = poses[0].rotation(bone).copy()
 
 
 # ---------------------------------------------------------------------------------------------------

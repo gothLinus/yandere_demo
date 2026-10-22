@@ -53,6 +53,8 @@ class Stance:
     """Per-character settings for the shared standing and seated stances."""
 
     idle_feet: dict
+    # Rest-pose armature-space mouth position, measured on the face mesh (it differs per head and height).
+    mouth: Vector
     idle_hips_offset: Vector = field(default_factory=Vector)
     idle_hips: tuple = (0.0, 0.0, 0.0)
     idle_spine: tuple = (0.0, 0.0, 0.0)
@@ -72,8 +74,6 @@ class Stance:
     # Resting wrist on the thigh: fraction along the thigh, then (inward, forward, up) metres.
     lap_fraction: float = 0.52
     lap_offset: Vector = field(default_factory=lambda: Vector((0.012, 0.0, 0.088)))
-    # Rest-pose armature-space mouth position, measured on the face mesh.
-    mouth: Vector = field(default_factory=lambda: Vector((0.0, -0.074, 1.362)))
 
 
 @dataclass
@@ -241,12 +241,13 @@ def compose(rig: CharacterRig, spec: BodySpec) -> Pose:
     pose.rotations["neck"] = degrees(*spec.neck)
     pose.rotations["head"] = degrees(*spec.head)
     idle_breathing(pose, spec.breath_phase, spec.breath_amount)
+    # Secondary bones first, so hand targets carried by them (the braid) see their final pose.
+    for bone, rotation in spec.extra_rotations.items():
+        pose.rotations[bone] = degrees(*rotation)
     for side in SIDES:
         arm = spec.arms[side]
         pose.turn(f"shoulder{side}", mirrored_degrees(side, *arm.shoulder))
         _pose_arm(rig, pose, side, arm)
-    for bone, rotation in spec.extra_rotations.items():
-        pose.rotations[bone] = degrees(*rotation)
     if spec.seated is not None:
         seated = spec.seated
     else:

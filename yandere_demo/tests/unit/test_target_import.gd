@@ -1,12 +1,16 @@
 extends TestCase
 
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
-const REQUIRED_BONES: Array[String] = ["head", "braid_06", "skirt_front_02"]
-const REQUIRED_BLEND_SHAPES: Array[String] = ["neutral", "startled", "suspicious", "happy", "blink"]
-const REQUIRED_MESHES: Array[String] = [
-	"TargetBody", "TargetHead", "TargetFace", "TargetHair", "TargetBraid", "TargetBows", "TargetUniform",
+const REQUIRED_BONES: Array[String] = ["head", "braid_10", "skirt_07_03", "ahoge_03", "index_03.L"]
+const REQUIRED_BLEND_SHAPES: Array[String] = [
+	"neutral", "startled", "suspicious", "happy", "blink",
+	"smile", "sad", "blush", "wink_L", "wink_R", "mouth_A", "mouth_I", "mouth_U", "mouth_E", "mouth_O",
 ]
-const SHADOWLESS_MESHES: Array[String] = ["TargetHair", "TargetBows"]
+const REQUIRED_MESHES: Array[String] = [
+	"TargetBody", "TargetFace", "TargetEyes", "TargetLashes", "TargetHair", "TargetBraid", "TargetTop",
+	"TargetNeckerchief", "TargetSkirt", "TargetSocks", "TargetShoes", "TargetAccessories", "TargetBlush",
+]
+const SHADOWLESS_MESHES: Array[String] = ["TargetHair", "TargetBlush"]
 const PROXY_MATERIAL_NAME: String = "M_CollisionProxy"
 const ANIMATION_FPS: float = 30.0
 # Clip name -> frame count at 30 fps.
@@ -26,8 +30,14 @@ const REQUIRED_ANIMATIONS: Dictionary[StringName, int] = {
 	&"target_lean_chat": 120,
 	&"target_sweep": 60,
 	&"target_wave": 45,
+	&"target_idle_shy": 120,
+	&"target_idle_playful": 90,
+	&"target_idle_confident": 120,
 }
-const LOOPING_ANIMATIONS: Array[StringName] = [&"target_idle", &"target_walk_routine", &"target_sit"]
+const LOOPING_ANIMATIONS: Array[StringName] = [
+	&"target_idle", &"target_walk_routine", &"target_sit",
+	&"target_idle_shy", &"target_idle_playful", &"target_idle_confident",
+]
 # Mirrors character_post_import.gd: these play once, every other clip loops linearly.
 const ONE_SHOT_ANIMATIONS: Array[StringName] = [
 	&"target_notice_player", &"target_startled", &"target_sit_down", &"target_stand_up",
@@ -99,7 +109,7 @@ func _assert_animations(root: Node) -> void:
 		assert_near(player.get_animation(animation_name).length, expected_length, 0.5 / ANIMATION_FPS, "%s length" % animation_name)
 	for animation_name: StringName in LOOPING_ANIMATIONS:
 		if player.has_animation(animation_name):
-			assert_true(player.get_animation(animation_name).loop_mode != Animation.LOOP_NONE, "%s loops" % animation_name)
+			assert_eq(player.get_animation(animation_name).loop_mode, Animation.LOOP_LINEAR, "%s loops" % animation_name)
 	for animation_name: StringName in player.get_animation_list():
 		var expected_loop: Animation.LoopMode = Animation.LOOP_NONE if ONE_SHOT_ANIMATIONS.has(animation_name) else Animation.LOOP_LINEAR
 		assert_eq(player.get_animation(animation_name).loop_mode, expected_loop, "%s loop mode" % animation_name)

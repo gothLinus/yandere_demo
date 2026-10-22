@@ -1,6 +1,7 @@
 """Structural checks for generated character assets, run inside Blender."""
 
 import bpy
+from mathutils.bvhtree import BVHTree
 
 PROXY_MATERIAL_NAME = "M_CollisionProxy"
 IDENTITY_TOLERANCE = 1e-5
@@ -139,3 +140,170 @@ def _is_identity(matrix) -> bool:
             if abs(matrix[row][column] - expected) > IDENTITY_TOLERANCE:
                 return False
     return True
+
+
+HEAD_RATIO_RANGE = (6.5, 7.0)
+SHOULDER_TO_HIP_LIMIT = 1.05
+TORSO_GROUPS = {"hips", "spine", "thigh.L", "thigh.R"}
+ZERO_AREA = 1e-10
+
+
+def validate_target_extras(prefix: str, shape_keys: list[str], pleat_count: int,
+                           skirt_clear_actions: list[str] | None = None) -> list[str]:
+    """Checks for the 4.1b target: shape keys on the split face meshes, the hidden blush, the pleat count,
+    skinned fingers, the femboy silhouette, and no leg poking through the skirt in `skirt_clear_actions`."""
+    errors: list[str] = []
+    for action_name in skirt_clear_actions or []:
+        if bpy.data.actions.get(action_name) is None:
+            continue
+        pokes = [(frame, count, depth) for frame, count, depth in skirt_penetrations(prefix, action_name) if count]
+        if pokes:
+            frame, count, depth = max(pokes, key=lambda item: item[2])
+            errors.append(f"{action_name}: legs poke through the skirt in {len(pokes)} frames "
+                          f"(worst frame {frame}: {count} vertices, {depth * 1000:.1f} mm)")
+    for part in ("Eyes", "Lashes"):
+        errors.extend(_validate_shape_keys(f"{prefix}{part}", shape_keys))
+    errors.extend(_validate_shape_keys(f"{prefix}Blush", ["blush"]))
+    errors.extend(_validate_blush_hidden(f"{prefix}Blush"))
+    skirt = bpy.data.objects.get(f"{prefix}Skirt")
+    if skirt is not None and skirt.get("pleat_count") != pleat_count:
+        errors.append(f"{skirt.name} pleat_count is {skirt.get('pleat_count')}, expected {pleat_count}")
+    body = bpy.data.objects.get(f"{prefix}Body")
+    if body is not None:
+        group_names = {group.name for group in body.vertex_groups}
+        for finger_tip in ("thumb_03.L", "index_03.L", "pinky_03.R"):
+            if finger_tip not in group_names:
+                errors.append(f"{body.name} has no weights for {finger_tip}")
+        errors.extend(_validate_silhouette(prefix, body))
+    return errors
+
+
+def _validate_shape_keys(object_name: str, required: list[str]) -> list[str]:
+    mesh_object = bpy.data.objects.get(object_name)
+    if mesh_object is None:
+        return [f"{object_name} is missing"]
+    keys = mesh_object.data.shape_keys
+    names = sorted(block.name for block in keys.key_blocks) if keys else []
+    expected = sorted(["Basis"] + list(required))
+    if names != expected:
+        return [f"{object_name} shape keys are {names}, expected exactly {expected}"]
+    return []
+
+
+def _validate_blush_hidden(object_name: str) -> list[str]:
+    """At blush = 0 every blush polygon must have zero area, so nothing renders."""
+    blush = bpy.data.objects.get(object_name)
+    if blush is None or blush.data.shape_keys is None:
+        return []
+    basis = blush.data.shape_keys.key_blocks["Basis"].data
+    for polygon in blush.data.polygons:
+        corners = [basis[index].co for index in polygon.vertices]
+        area = sum(((corners[index] - corners[0]).cross(corners[index + 1] - corners[0])).length
+                   for index in range(1, len(corners) - 1))
+        if area > ZERO_AREA:
+            return [f"{object_name} is visible with blush at 0 (polygon {polygon.index} has area {area:.2e})"]
+    return []
+
+
+def _validate_silhouette(prefix: str, body) -> list[str]:
+    errors: list[str] = []
+    armature = body.parent
+    names = {group.index: group.name for group in body.vertex_groups}
+    upper_arm = armature.matrix_world @ armature.data.bones["upper_arm.L"].head_local
+    hips = armature.matrix_world @ armature.data.bones["hips"].head_local
+    shoulder_half = 0.0
+    hip_half = 0.0
+    for vertex in body.data.vertices:
+        point = body.matrix_world @ vertex.co
+        if abs(point.z - upper_arm.z) < 0.01:
+            shoulder_half = max(shoulder_half, abs(point.x))
+        dominant = max(vertex.groups, key=lambda element: element.weight, default=None)
+        if dominant is not None and names[dominant.group] in TORSO_GROUPS and hips.z - 0.14 < point.z < hips.z + 0.02:
+            hip_half = max(hip_half, abs(point.x))
+    if hip_half <= 0.0 or shoulder_half > hip_half * SHOULDER_TO_HIP_LIMIT:
+        errors.append(f"shoulder width {2 * shoulder_half:.3f} m exceeds {SHOULDER_TO_HIP_LIMIT} x hip width {2 * hip_half:.3f} m")
+    face = bpy.data.objects.get(f"{prefix}Face")
+    if face is not None and "head" in face.vertex_groups:
+        head_group = face.vertex_groups["head"].index
+        heights = [(face.matrix_world @ vertex.co).z for vertex in face.data.vertices
+                   if any(element.group == head_group for element in vertex.groups)]
+        _, crown = armature.matrix_world @ armature.data.bones["head"].head_local, max(heights)
+        ratio = (armature.matrix_world @ armature.data.bones["head"].tail_local).z / (crown - min(heights))
+        if not HEAD_RATIO_RANGE[0] <= ratio <= HEAD_RATIO_RANGE[1]:
+            errors.append(f"head-to-height ratio is 1:{ratio:.2f}, expected 1:{HEAD_RATIO_RANGE[0]}-{HEAD_RATIO_RANGE[1]}")
+    return errors
+
+
+SKIRT_PENETRATION_TOLERANCE = 0.003
+# Skirt faces this close to the hem (rest pose, fraction of the skirt length) count as the hem edge, where legs
+# legitimately show below the fabric.
+SKIRT_HEM_FRACTION = 0.9
+# A poke is a leg vertex just outside the fabric; anything further away is leg showing below the hem.
+SKIRT_POKE_RANGE = 0.04
+
+
+def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, float]]:
+    """(frame, leg vertices poking out through the skirt, deepest poke in metres) for every frame of an action.
+
+    A thigh or knee vertex pokes through when no skirt lies further out along the ray from its leg bone through
+    it, while the nearest
+    skirt face is above the hem edge (so a leg simply showing below the hem does not count).
+    """
+    armature = bpy.data.objects[f"{prefix}Char"]
+    skirt = bpy.data.objects[f"{prefix}Skirt"]
+    legs = [bpy.data.objects[f"{prefix}{part}"] for part in ("Body", "Socks")]
+    action = bpy.data.actions[action_name]
+    rest_z = [polygon.center.z for polygon in skirt.data.polygons]
+    top, bottom = max(rest_z), min(rest_z)
+    interior = [(top - z) / (top - bottom) < SKIRT_HEM_FRACTION for z in rest_z]
+    leg_vertices = {}
+    for leg in legs:
+        names = {group.index: group.name for group in leg.vertex_groups}
+        leg_vertices[leg.name] = [(vertex.index, names[dominant.group]) for vertex in leg.data.vertices
+                                  if (dominant := max(vertex.groups, key=lambda element: element.weight, default=None))
+                                  and names[dominant.group].startswith(("thigh", "shin"))]
+    animation_data = armature.animation_data_create()
+    previous_action = animation_data.action
+    animation_data.action = action
+    if hasattr(animation_data, "action_slot") and action.slots:
+        animation_data.action_slot = action.slots[0]
+    scene = bpy.context.scene
+    results = []
+    for frame in range(int(action.frame_range[0]), int(action.frame_range[1]) + 1):
+        scene.frame_set(frame)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated_skirt = skirt.evaluated_get(depsgraph)
+        mesh = evaluated_skirt.to_mesh()
+        vertices = [skirt.matrix_world @ vertex.co for vertex in mesh.vertices]
+        tree = BVHTree.FromPolygons(vertices, [tuple(polygon.vertices) for polygon in mesh.polygons])
+        evaluated_skirt.to_mesh_clear()
+        bones = {name: (armature.matrix_world @ armature.pose.bones[name].head, armature.matrix_world @ armature.pose.bones[name].tail)
+                 for name in ("thigh.L", "thigh.R", "shin.L", "shin.R")}
+        count = 0
+        deepest = 0.0
+        for leg in legs:
+            evaluated_leg = leg.evaluated_get(depsgraph)
+            leg_mesh = evaluated_leg.to_mesh()
+            for index, bone_name in leg_vertices[leg.name]:
+                point = leg.matrix_world @ leg_mesh.vertices[index].co
+                start, end = bones[bone_name]
+                segment = end - start
+                along = max(0.0, min(1.0, (point - start).dot(segment) / segment.length_squared))
+                direction = point - (start + segment * along)
+                length = direction.length
+                if length < 1e-6:
+                    continue
+                # Covered when the skirt lies further out along the ray from the body axis through the vertex.
+                hit, _, _, _ = tree.ray_cast(point, direction / length, 1.0)
+                if hit is not None:
+                    continue
+                location, normal, face_index, distance = tree.find_nearest(point)
+                if (location is None or not interior[face_index % len(interior)]
+                        or not SKIRT_PENETRATION_TOLERANCE <= distance <= SKIRT_POKE_RANGE):
+                    continue
+                count += 1
+                deepest = max(deepest, distance)
+            evaluated_leg.to_mesh_clear()
+        results.append((frame, count, deepest))
+    animation_data.action = previous_action
+    return results

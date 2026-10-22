@@ -5,12 +5,13 @@ from dataclasses import dataclass
 
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 from . import mesh_utils
 from .materials import principled
-from .rig import SKIRT_BONES, SKIRT_SIDES, add_skirt_chains, bone_world_points
+from . import hair, pleats
+from .rig import SLEEVE_BONES, add_bone, add_chain, bone_world_points
 
 UNIFORM_COLORS = {
     "sailor_red": {"main": "#f7f5f8", "accent": "#c9505c", "accent_material": "M_UniformRed", "neckerchief": "#f39fae"},
@@ -19,8 +20,17 @@ UNIFORM_COLORS = {
 
 REFERENCE_HEIGHT = 1.58
 SLEEVE_FRACTION = 0.52
-PLEAT_COUNT = 24
-LOWER_BODY_BONES = {"hips", "spine", "thigh.L", "thigh.R", "shin.L", "shin.R"}
+PLEAT_COUNT = 20
+PLEAT_DEPTH = 0.012
+HEM_FLARE = 0.18
+# The femboy top sits slightly loose on the narrow frame.
+TOP_EASE = 0.011
+SLEEVE_PUFF = 0.012
+# The top's hem rings stand this far outside the skirt's outer pleat faces.
+TOP_HEM_EASE = 0.024
+# Sleeve hems follow their spring bone this much at the cuff, fading out toward the shoulder.
+SLEEVE_BONE_SHARE = 0.8
+SLEEVE_BONE_START = 0.22
 
 WHITE = 0
 ACCENT = 1
@@ -77,122 +87,19 @@ class UniformLevels:
         return (self.waist_z - z) / (self.waist_z - self.hem_z)
 
 
-def add_skirt_bones(armature, params) -> list:
-    levels = UniformLevels.from_armature(armature)
-    return add_skirt_chains(armature, levels.waist_z, levels.hem_z, 0.11 * levels.scale, 0.09 * levels.scale)
+class HemFit:
+    """Where the top's hem rings may sit: just outside the pleated skirt (its drape profile plus pleat depth)."""
 
-
-class SkirtShape:
-    """Radial skirt profile, fitted around the body's hips so no vertex pokes through."""
-
-    def __init__(self, body, levels: UniformLevels):
-        self.levels = levels
-        self.bands = {}
-        names = {group.index: group.name for group in body.vertex_groups}
-        for vertex in body.data.vertices:
-            point = body.matrix_world @ vertex.co
-            if point.z < levels.hem_z - 0.05 or point.z > levels.waist_z + 0.05:
-                continue
-            dominant = max(vertex.groups, key=lambda element: element.weight, default=None)
-            if dominant is None or names[dominant.group] not in LOWER_BODY_BONES:
-                continue
-            band = round(point.z / 0.02)
-            sector = round(math.atan2(point.y - 0.004, point.x) / (2 * math.pi) * 36) % 36
-            distance = math.hypot(point.x, point.y - 0.004)
-            key = (band, sector)
-            self.bands[key] = max(self.bands.get(key, 0.0), distance)
-
-    def body_extent(self, angle: float, z: float) -> float:
-        sector = round(angle / (2 * math.pi) * 36) % 36
-        band = round(z / 0.02)
-        extent = 0.0
-        for band_offset in (-1, 0, 1):
-            for sector_offset in (-1, 0, 1):
-                extent = max(extent, self.bands.get((band + band_offset, (sector + sector_offset) % 36), 0.0))
-        return extent
+    def __init__(self, armature, params, pleat_depth: float, hem_flare: float):
+        self.levels = UniformLevels.from_armature(armature)
+        self.skirt_levels = pleats.SkirtLevels(armature)
+        body = bpy.data.objects[f"{params.prefix}Body"]
+        self.profile = pleats.DrapeProfile(body, self.skirt_levels, hem_flare)
+        self.pleat_depth = pleat_depth
 
     def radius(self, angle: float, z: float) -> float:
-        flare = max(0.0, self.levels.skirt_fraction(z)) ** 0.85
-        radius_x = (0.090 + 0.125 * flare) * self.levels.scale
-        radius_y = (0.074 + 0.105 * flare) * self.levels.scale
-        profile = (radius_x * radius_y) / math.hypot(radius_y * math.cos(angle), radius_x * math.sin(angle))
-        return max(profile, self.body_extent(angle, z) + 0.016 * self.levels.scale)
-
-
-def build_skirt(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
-    levels = shape.levels
-    scale = levels.scale
-    stripe_bands = [(0.032 * scale, 0.040 * scale), (0.050 * scale, 0.058 * scale)]
-    heights = [levels.waist_z - (levels.waist_z - levels.hem_z - 0.07 * scale) * index / 9 for index in range(10)]
-    for low, high in stripe_bands:
-        heights += [levels.hem_z + high, levels.hem_z + low]
-    heights += [levels.hem_z + 0.022 * scale, levels.hem_z + 0.011 * scale, levels.hem_z]
-    heights = sorted(set(round(height, 4) for height in heights), reverse=True)
-
-    samples_per_pleat = 4
-    count = PLEAT_COUNT * samples_per_pleat
-    rings = []
-    for z in heights:
-        amplitude = (0.002 + 0.010 * levels.skirt_fraction(z)) * scale
-        ring = []
-        for index in range(count):
-            angle = 2 * math.pi * index / count
-            phase = (index % samples_per_pleat) / samples_per_pleat
-            sawtooth = phase * 2 - 1 if phase > 0 else 1.0
-            radius = shape.radius(angle, z) + amplitude * (0.5 + 0.5 * sawtooth)
-            ring.append(Vector((math.cos(angle) * radius, math.sin(angle) * radius + 0.004, z)))
-        rings.append(ring)
-    vertices, faces = mesh_utils.loft(rings)
-    material_indices = []
-    for ring_index in range(len(rings) - 1):
-        middle = (heights[ring_index] + heights[ring_index + 1]) * 0.5 - levels.hem_z
-        is_stripe = any(low < middle < high for low, high in stripe_bands)
-        material_indices += [WHITE if is_stripe else ACCENT] * count
-    skirt = mesh_utils.mesh_from_geometry(f"{params.prefix}Skirt", vertices, faces, _uniform_materials(params), material_indices)
-    fold_edges = []
-    for edge in skirt.data.edges:
-        first, second = edge.vertices
-        same_column = first % count == second % count
-        fold_edges.append(same_column and (first % count) % samples_per_pleat in (0, 1))
-    mesh_utils.mark_sharp_edges(skirt, fold_edges)
-    mesh_utils.recalculate_normals(skirt)
-    _ensure_outward(skirt, Vector((0, 0.004, 0)))
-    mesh_utils.add_modifier(skirt, "SOLIDIFY", thickness=0.003, offset=-1.0, use_even_offset=True)
-    mesh_utils.apply_modifiers(skirt)
-    _skirt_weights(skirt, armature, levels)
-    return skirt
-
-
-def _skirt_weights(skirt, armature, levels: UniformLevels) -> None:
-    directions = {"front": -math.pi / 2, "back": math.pi / 2, "left": 0.0, "right": math.pi}
-    skirt.vertex_groups.clear()
-    groups = {name: skirt.vertex_groups.new(name=name) for name in ["hips", "thigh.L", "thigh.R"] + SKIRT_BONES}
-    for vertex in skirt.data.vertices:
-        point = vertex.co
-        angle = math.atan2(point.y - 0.004, point.x)
-        fraction = max(0.0, min(1.0, levels.skirt_fraction(point.z)))
-        hips_weight = max(0.0, 1.0 - fraction * 3.0)
-        upper = max(0.0, 1.0 - abs(fraction - 0.4) / 0.4) if fraction < 0.8 else 0.0
-        lower = max(0.0, (fraction - 0.4) / 0.6)
-        side_weights = {}
-        for side, direction in directions.items():
-            difference = abs(math.atan2(math.sin(angle - direction), math.cos(angle - direction)))
-            side_weights[side] = max(0.0, math.cos(difference)) ** 2
-        side_total = sum(side_weights.values())
-        weights = {"hips": hips_weight}
-        # Part of the lower skirt follows the nearer thigh, so walking legs push the hem instead of piercing it.
-        radius = math.hypot(point.x, point.y - 0.004)
-        leg_share = min(1.0, abs(point.x) / max(radius * 0.6, 1e-6))
-        weights["thigh.L" if point.x > 0 else "thigh.R"] = 0.35 * fraction ** 1.3 * leg_share
-        for side in SKIRT_SIDES:
-            share = side_weights[side] / side_total
-            weights[f"skirt_{side}_01"] = upper * share
-            weights[f"skirt_{side}_02"] = lower * share
-        total = sum(weights.values())
-        for name, weight in weights.items():
-            if weight > 1e-4:
-                groups[name].add([vertex.index], weight / total, "REPLACE")
-    mesh_utils.parent_to_armature(skirt, armature)
+        fraction = self.skirt_levels.fraction(z)
+        return self.profile.radius(angle, fraction) + self.pleat_depth * self.levels.scale * pleats._pleat_opening(max(0.0, fraction))
 
 
 def _ensure_outward(mesh_object, axis_point: Vector) -> None:
@@ -204,7 +111,7 @@ def _ensure_outward(mesh_object, axis_point: Vector) -> None:
         mesh_object.data.flip_normals()
 
 
-def build_top(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
+def build_top(body, params, armature, shape: HemFit) -> bpy.types.Object:
     top = body.copy()
     top.data = body.data.copy()
     top.name = f"{params.prefix}Top"
@@ -250,13 +157,13 @@ def build_top(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
             axis = (end - start).normalized()
             fraction = along(vertex.co, bone)
             radial = vertex.co - (start + axis * (vertex.co - start).dot(axis))
-            puff = 0.010 + 0.006 * math.sin(math.pi * min(1.0, fraction / SLEEVE_FRACTION))
+            puff = SLEEVE_PUFF + 0.005 * math.sin(math.pi * min(1.0, fraction / SLEEVE_FRACTION))
             if vertex.is_boundary and fraction > SLEEVE_FRACTION * 0.7:
                 vertex.co = start + axis * (end - start).length * SLEEVE_FRACTION + radial.normalized() * (radial.length + puff)
             else:
                 vertex.co += vertex.normal * puff
             continue
-        vertex.co += vertex.normal * 0.008
+        vertex.co += vertex.normal * TOP_EASE
     _extrude_hem(bm, shape)
     # bmesh element order after delete and extrude varies between runs; a canonical order keeps exports stable.
     bm.faces.index_update()
@@ -271,7 +178,7 @@ def build_top(body, params, armature, shape: SkirtShape) -> bpy.types.Object:
     return top
 
 
-def _extrude_hem(bm, shape: SkirtShape) -> None:
+def _extrude_hem(bm, shape: HemFit) -> None:
     """Extend the torso's lower cut into clean horizontal rings that drape over the skirt waistband."""
     levels = shape.levels
     hem_edges = [edge for edge in bm.edges
@@ -293,7 +200,7 @@ def _extrude_hem(bm, shape: SkirtShape) -> None:
                    for vertex in new_vertices}
         for vertex in new_vertices:
             angle, base_radius = radii[sources[vertex]]
-            radius = max(base_radius * loosen, shape.radius(angle, z) + 0.018 * levels.scale)
+            radius = max(base_radius * loosen, shape.radius(angle, z) + TOP_HEM_EASE * levels.scale)
             vertex.co = Vector((math.cos(angle) * radius, math.sin(angle) * radius + 0.004, z))
             radii[vertex] = (angle, base_radius)
     # recalc_face_normals is not reliable on an open shell (it can flip the whole top between runs);
@@ -487,13 +394,19 @@ def _orient_away_from_body(mesh_object, armature) -> None:
     mesh_object.data.update()
 
 
+NECKERCHIEF_TAIL_ROOT_SHARE = 0.2
+
+
 def build_neckerchief(top, collar, params, armature) -> bpy.types.Object:
+    """The pink knot, the V fill inside the collar and two tails; each tail hangs on its `neckerchief_<side>` chain."""
     surface = _Surface(top)
     v_point = Vector(collar["v_point"])
     knot_center, knot_normal = surface.place(v_point + Vector((0, 0, -0.012)), 0.012)
     parts = []
+    vertex_bones = []
     vertices, faces = mesh_utils.ellipsoid(knot_center, Vector((0.019, 0.010, 0.012)), 14, 8)
     parts.append((vertices, faces, NECKERCHIEF))
+    vertex_bones += [[(["chest"], 1.0)]] * len(vertices)
     for sign, length, spread in ((1.0, 0.115, 0.030), (-1.0, 0.100, 0.036)):
         points = []
         normals = []
@@ -503,16 +416,24 @@ def build_neckerchief(top, collar, params, armature) -> bpy.types.Object:
             placed, normal = surface.place(guess, 0.010 + 0.004 * (1 - fraction))
             points.append(placed)
             normals.append(normal)
+        chain = add_chain(armature, f"neckerchief_{'L' if sign > 0 else 'R'}", "chest", [points[0], points[3], points[6]])
         widths = [0.020, 0.030, 0.034, 0.036, 0.036, 0.032, 0.026]
         ribbon_vertices, ribbon_faces = _flat_ribbon(points, widths, normals, notch=0.012)
         parts.append((ribbon_vertices, ribbon_faces, NECKERCHIEF))
+        for index in range(len(ribbon_vertices)):
+            along = (index // 2) / (len(points) - 1)
+            share = min(1.0, along / NECKERCHIEF_TAIL_ROOT_SHARE)
+            vertex_bones.append([(["chest"], 1.0 - share), (chain, share)])
     fill = _v_fill(surface, collar, v_point)
     parts.append(fill)
+    vertex_bones += [[(["chest"], 1.0)]] * len(fill[0])
     vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
     neckerchief = mesh_utils.mesh_from_geometry(f"{params.prefix}Neckerchief", vertices, faces, _uniform_materials(params), material_indices)
+    mesh_utils.weight_by_segments(neckerchief, armature, vertex_bones)
     _orient_away_from_body(neckerchief, armature)
     mesh_utils.add_modifier(neckerchief, "SOLIDIFY", thickness=0.002, offset=-1.0)
     mesh_utils.apply_modifiers(neckerchief)
+    mesh_utils.parent_to_armature(neckerchief, armature)
     return neckerchief
 
 
@@ -601,25 +522,137 @@ def build_shoes(body, params, armature) -> bpy.types.Object:
     return shoes
 
 
-def build_sailor_uniform(body, params, armature) -> bpy.types.Object:
+def add_sleeve_bones(armature) -> list:
+    """One bone per sleeve along the upper arm, from near the shoulder to the sleeve hem."""
+    names = []
+    for side, bone_name in zip((".L", ".R"), SLEEVE_BONES):
+        start, end = bone_world_points(armature, f"upper_arm{side}")
+        names.append(add_bone(armature, bone_name, start.lerp(end, 0.12), start.lerp(end, SLEEVE_FRACTION), f"upper_arm{side}"))
+    return names
+
+
+def _rebalance_top_weights(top, armature, levels: UniformLevels) -> None:
+    """The hem rings move with the hips like the skirt waistband (so a forward lean does not push the top into
+    the skirt), and the sleeves hand part of the upper arm's weight to their spring bones."""
+    groups = {group.name: group for group in top.vertex_groups}
+    for name in ("hips",) + tuple(SLEEVE_BONES):
+        if name not in groups:
+            groups[name] = top.vertex_groups.new(name=name)
+    names = {group.index: group.name for group in top.vertex_groups}
+    arms = {side: bone_world_points(armature, f"upper_arm{side}") for side in (".L", ".R")}
+    hem_top = levels.top_cut_z + 0.03 * levels.scale
+    for vertex in top.data.vertices:
+        point = top.matrix_world @ vertex.co
+        weights = {names[element.group]: element.weight for element in vertex.groups if element.weight > 1e-5}
+        total = sum(weights.values())
+        if total <= 0.0:
+            continue
+        weights = {name: weight / total for name, weight in weights.items()}
+        hips_share = _smoothstep(hem_top, levels.waist_z, point.z)
+        if hips_share > 0.0:
+            weights = {name: weight * (1.0 - hips_share) for name, weight in weights.items()}
+            weights["hips"] = weights.get("hips", 0.0) + hips_share
+        for side, sleeve in zip((".L", ".R"), SLEEVE_BONES):
+            arm = f"upper_arm{side}"
+            if weights.get(arm, 0.0) <= 0.0:
+                continue
+            start, end = arms[side]
+            along = (point - start).dot(end - start) / (end - start).length_squared
+            share = SLEEVE_BONE_SHARE * _smoothstep(SLEEVE_BONE_START, SLEEVE_FRACTION, along)
+            moved = weights[arm] * share
+            weights[arm] -= moved
+            weights[sleeve] = weights.get(sleeve, 0.0) + moved
+        for group in top.vertex_groups:
+            group.remove([vertex.index])
+        for name, weight in weights.items():
+            if weight > 1e-5:
+                groups[name].add([vertex.index], weight, "REPLACE")
+
+
+def _smoothstep(edge_start: float, edge_end: float, value: float) -> float:
+    fraction = min(1.0, max(0.0, (value - edge_start) / (edge_end - edge_start)))
+    return fraction * fraction * (3.0 - 2.0 * fraction)
+
+
+def build_sailor_uniform(body, params, armature) -> dict:
+    """Build `<prefix>Top` (top, collar, cuffs), `<prefix>Neckerchief`, `<prefix>Skirt` and `<prefix>Shoes`."""
     _uniform_colors(params.uniform)
-    shape = SkirtShape(body, UniformLevels.from_armature(armature))
-    skirt = build_skirt(body, params, armature, shape)
+    shape = HemFit(armature, params, PLEAT_DEPTH, HEM_FLARE)
+    skirt = pleats.build_pleated_skirt(armature, params, PLEAT_COUNT, PLEAT_DEPTH, HEM_FLARE)
     top = build_top(body, params, armature, shape)
     collar = build_collar(top, params, armature)
     neckerchief = build_neckerchief(top, collar, params, armature)
     cuffs = build_cuffs(top, params, armature)
     mesh_utils.add_modifier(top, "SOLIDIFY", thickness=0.0025, offset=-1.0)
     mesh_utils.apply_modifiers(top)
-    shoes = build_shoes(body, params, armature)
-    for piece in (collar, neckerchief, cuffs):
+    # The feet now belong to the socks mesh, so the shoes are sized from it.
+    shoes = build_shoes(bpy.data.objects[f"{params.prefix}Socks"], params, armature)
+    for piece in (collar, cuffs):
         mesh_utils.transfer_weights(body, piece, armature)
     mesh_utils.parent_to_armature(top, armature)
-    uniform = mesh_utils.join_objects(f"{params.prefix}Uniform", [top, skirt, collar, neckerchief, cuffs, shoes])
-    if "v_point" in uniform:
-        del uniform["v_point"]
-    mesh_utils.shade_smooth(uniform)
-    return uniform
+    pin_point = _collar_pin_point(top, collar)
+    top = mesh_utils.join_objects(f"{params.prefix}Top", [top, collar, cuffs])
+    if "v_point" in top:
+        del top["v_point"]
+    _rebalance_top_weights(top, armature, shape.levels)
+    for piece in (top, neckerchief, shoes):
+        mesh_utils.shade_smooth(piece)
+    return {"top": top, "neckerchief": neckerchief, "skirt": skirt, "shoes": shoes, "collar_pin": pin_point}
+
+
+def _collar_pin_point(top, collar) -> tuple:
+    """A spot on the left lapel, above the knot, for the collar pin (point and outward normal)."""
+    surface = _Surface(top)
+    v_point = Vector(collar["v_point"])
+    return surface.place(v_point + Vector((0.040, 0.0, 0.050)), 0.0125)
+
+
+ACCESSORY_BOW = 0
+ACCESSORY_METAL = 1
+
+
+def build_accessories(params, armature, collar_pin: tuple) -> bpy.types.Object:
+    """`<prefix>Accessories`: the head and braid bows, a crossed hair clip under each head bow and a collar pin."""
+    head_parts, braid_parts = hair.bow_parts(params, armature)
+    clip_parts = []
+    for origin, facing, up_hint in hair.head_bow_frames(armature):
+        normal = facing.normalized()
+        up = (up_hint - normal * normal.dot(up_hint)).normalized()
+        across = up.cross(normal).normalized()
+        center = origin - up * 0.020 + normal * 0.0015
+        for tilt in (-32.0, 32.0):
+            angle = math.radians(tilt)
+            bar = (across * math.cos(angle) + up * math.sin(angle)).normalized()
+            basis = Matrix((bar, normal.cross(bar).normalized(), normal)).transposed()
+            vertices, faces = mesh_utils.ellipsoid(center, Vector((0.012, 0.0017, 0.0013)), 10, 6, basis)
+            clip_parts.append((vertices, faces, ACCESSORY_METAL))
+    pin_point, pin_normal = collar_pin
+    pin_basis = _basis_facing(pin_normal)
+    pin_vertices, pin_faces = mesh_utils.ellipsoid(Vector(pin_point), Vector((0.0062, 0.0062, 0.0018)), 16, 8, pin_basis)
+    pin_parts = [(pin_vertices, pin_faces, ACCESSORY_METAL)]
+    stone_vertices, stone_faces = mesh_utils.ellipsoid(Vector(pin_point) + Vector(pin_normal) * 0.0017,
+                                                       Vector((0.0034, 0.0034, 0.0014)), 12, 6, pin_basis)
+    pin_parts.append((stone_vertices, stone_faces, ACCESSORY_BOW))
+    groups = [("head", head_parts + clip_parts), (hair.BRAID_BOW_BONE, braid_parts), ("chest", pin_parts)]
+    parts = [part for _, group_parts in groups for part in group_parts]
+    vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
+    materials = [principled("M_Bow", "#1d151b", 0.35), principled("M_HairClip", "#e8c372", 0.3)]
+    accessories = mesh_utils.mesh_from_geometry(f"{params.prefix}Accessories", vertices, faces, materials, material_indices)
+    mesh_utils.recalculate_normals(accessories)
+    start = 0
+    for bone_name, group_parts in groups:
+        count = sum(len(part[0]) for part in group_parts)
+        accessories.vertex_groups.new(name=bone_name).add(range(start, start + count), 1.0, "REPLACE")
+        start += count
+    mesh_utils.parent_to_armature(accessories, armature)
+    return accessories
+
+
+def _basis_facing(normal) -> Matrix:
+    normal = Vector(normal).normalized()
+    reference = Vector((0, 0, 1)) if abs(normal.z) < 0.9 else Vector((1, 0, 0))
+    across = reference.cross(normal).normalized()
+    return Matrix((across, normal.cross(across).normalized(), normal)).transposed()
 
 
 def build_collision_proxy(armature, params, radius: float = 0.22) -> bpy.types.Object:

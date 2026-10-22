@@ -71,3 +71,32 @@ func test_environment_outlines_only_props_and_keeps_bodies() -> void:
 	assert_true(body.get_parent() == root, "static body kept")
 	assert_true(not root.has_meta("body_shape"))
 	root.free()
+
+
+func test_hair_materials_get_the_highlight_band() -> void:
+	var root: Node3D = Node3D.new()
+	var hair: MeshInstance3D = make_mesh_instance("Hair", make_material("M_Hair", Color.PINK))
+	var shade: MeshInstance3D = make_mesh_instance("Shade", make_material("M_HairShade", Color.PINK))
+	var clip: MeshInstance3D = make_mesh_instance("Clip", make_material("M_HairClip", Color.GOLD))
+	root.add_child(hair)
+	root.add_child(shade)
+	root.add_child(clip)
+	ToonConverter.convert_character(root, 0.004)
+	assert_eq((hair.mesh.surface_get_material(0) as ShaderMaterial).get_shader_parameter("use_hair_band"), true, "M_Hair has the band")
+	assert_true((shade.mesh.surface_get_material(0) as ShaderMaterial).get_shader_parameter("use_hair_band") != true, "M_HairShade has no band")
+	assert_true((clip.mesh.surface_get_material(0) as ShaderMaterial).get_shader_parameter("use_hair_band") != true, "M_HairClip is not hair")
+	root.free()
+
+
+func test_blush_uses_the_alpha_blended_toon_shader_without_outline() -> void:
+	var root: Node3D = Node3D.new()
+	var blush_color: Color = Color(0.95, 0.5, 0.58, 0.6)
+	var blush: MeshInstance3D = make_mesh_instance("Blush", make_material("M_FaceBlush", blush_color))
+	root.add_child(blush)
+	ToonConverter.convert_character(root, 0.004)
+	var converted: ShaderMaterial = blush.mesh.surface_get_material(0) as ShaderMaterial
+	assert_true(converted != null, "blush is a ShaderMaterial")
+	assert_eq(converted.shader, ToonConverter.BLUSH_SHADER, "blush uses the blush shader")
+	assert_eq(converted.get_shader_parameter("albedo_color"), blush_color, "blush keeps its colour and alpha")
+	assert_true(converted.next_pass == null, "no outline on the blush")
+	root.free()
