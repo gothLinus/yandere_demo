@@ -1407,7 +1407,12 @@ This task implements spec §4.1b. It upgrades the generator and the target in pl
   - `func set_expression(expression: StringName, blend_seconds: float = 0.25) -> void` tweens every `MeshInstance3D` blend shape with that name to 1 and the others to 0. It ignores meshes that lack the shape.
   - Blinks run on a random 2–6 s timer: `blink` 0→1→0 over 0.15 s.
 - **Produces: `class_name SecondaryMotion extends Node`**
-  - Configures a `SpringBoneSimulator3D` under the `Skeleton3D` with every secondary chain from Task 9b: `braid_01→braid_10`, `braid_bow`, `ahoge_01→03`, `hair_front_*`, `hair_side_*`, `neckerchief_*`, `sleeve_*`, and `skirt_00..07_01→03`. Per-chain values come from `data/secondary_motion.tres` (`SecondaryMotionTuning`). The thigh, hip and chest capsule colliders from that resource are added as `SpringBoneCollisionCapsule3D` nodes. The skirt chains must collide with the thighs.
+  - Configures a `SpringBoneSimulator3D` under the `Skeleton3D` with every secondary chain from Task 9b: `braid_01→braid_10`, `braid_bow`, `ahoge_01→03`, `hair_front_*`, `hair_side_*`, `neckerchief_*`, `sleeve_*`, and `skirt_00..07_01→03`. Per-chain values come from `data/secondary_motion.tres` (`SecondaryMotionTuning`):
+    - Use every field in it: stiffness, drag, gravity, radius, per-chain end-bone length, extend-end-bone and bone direction.
+    - Set the center mode to `CENTER_FROM_BONE` with `tuning.center_bone`, so the springs simulate relative to the character rather than world space.
+    - Each chain collides only with the capsules listed in its `colliders` field. Don't call `set_enable_all_child_collisions`.
+    - Add the colliders as `SpringBoneCollisionCapsule3D` nodes.
+    - Lower the braid's influence while `target_fix_braid` plays.
 - **Produces: `class_name TargetAI extends CharacterBody3D`**
   - `enum State { TRAVEL, ARRIVING, ENTERING, ACTIVITY, LEAVING, MICRO_STOP, NOTICE, SUSPICIOUS, STARTLED, REPORTING, GONE }`
   - Signals:
