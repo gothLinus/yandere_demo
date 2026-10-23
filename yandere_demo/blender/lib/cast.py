@@ -16,10 +16,13 @@ def build_figure(params: body.CharacterParams) -> tuple:
 
 
 def build_face(armature, params: body.CharacterParams, eye_texture_path: str, shape_keys: list[str]) -> bpy.types.Object:
-    """`<prefix>Face`, `<prefix>Eyes` and `<prefix>Lashes` carrying `shape_keys`, with a freshly painted eye texture."""
+    """`<prefix>Face`, `<prefix>Eyes` and `<prefix>Lashes` carrying `shape_keys`, with a freshly painted eye texture
+    shaded in the iris's own hue (the target's eyes lean violet instead)."""
     head = face.build_head(armature, params)
-    face.paint_eye_texture(eye_texture_path, hex_to_srgb(params.eye_color), highlight=False, pupil=False)
-    return face.build_face_features(head, params, eye_texture_path, shape_keys)
+    iris = hex_to_srgb(params.eye_color)
+    tints = face.iris_eye_tints(iris)
+    face.paint_eye_texture(eye_texture_path, iris, highlight=False, pupil=False, tints=tints)
+    return face.build_face_features(head, params, eye_texture_path, shape_keys, tints)
 
 
 def finish(armature) -> None:

@@ -379,11 +379,11 @@ def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, fl
                 start, end = bones[bone_name]
                 segment = end - start
                 along = (point - start).dot(segment) / segment.length_squared
-                if along <= 0.0:
+                if along <= 0.0 and bone_name.startswith("thigh"):
                     # Above the hip joint (the crease of a raised thigh) a leg has no radial direction: the ray would
                     # run up inside the torso. That skin sits under the skirt's waist.
                     continue
-                along = min(1.0, along)
+                along = max(0.0, min(1.0, along))
                 direction = point - (start + segment * along)
                 length = direction.length
                 if length < 1e-6 or direction.z < -SKIRT_OPENING_SLOPE * length:

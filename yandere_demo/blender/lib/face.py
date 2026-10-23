@@ -127,7 +127,21 @@ def _add_nose(head, center: Vector) -> None:
     head.data.update()
 
 
-def paint_eye_texture(path: str, iris_color: tuple, highlight: bool, size: int = 512, pupil: bool = True) -> bpy.types.Image:
+# What the iris shades toward: its dark top, its light bottom, the glow under it and the pupil disc (added to the
+# darkened iris). The target's anime eyes lean violet whatever the iris colour.
+TARGET_EYE_TINTS = {"dark": (0.16, 0.07, 0.30), "light": (0.97, 0.90, 1.0), "glow": (1.0, 0.82, 0.98),
+                    "pupil": (0.12, 0.05, 0.22)}
+
+
+def iris_eye_tints(iris_color: tuple) -> dict:
+    """Tints that keep the iris its own hue: a deep shade of it, pale tints of it and a darker pupil."""
+    iris = numpy.array(iris_color, dtype=float)
+    return {"dark": tuple(iris * 0.2), "light": tuple(_mix(iris, numpy.ones(3), 0.85)),
+            "glow": tuple(_mix(iris, numpy.ones(3), 0.6)), "pupil": tuple(iris * 0.05)}
+
+
+def paint_eye_texture(path: str, iris_color: tuple, highlight: bool, size: int = 512, pupil: bool = True,
+                      tints: dict = TARGET_EYE_TINTS) -> bpy.types.Image:
     """Paint the left-eye texture (inner corner at u=0) with numpy and save it as PNG.
 
     With `pupil` or `highlight` off they are left out of the texture, for faces that model them as geometry
@@ -142,8 +156,8 @@ def paint_eye_texture(path: str, iris_color: tuple, highlight: bool, size: int =
     opening = _soft_step(top - t_grid, pixel * 1.5) * _soft_step(t_grid - bottom, pixel * 1.5) * inside_horizontal
 
     iris = numpy.array(iris_color, dtype=float)
-    dark = _mix(iris, numpy.array((0.16, 0.07, 0.30)), 0.72)
-    light = _mix(iris, numpy.array((0.97, 0.90, 1.0)), 0.55)
+    dark = _mix(iris, numpy.array(tints["dark"]), 0.72)
+    light = _mix(iris, numpy.array(tints["light"]), 0.55)
     sclera = numpy.array((1.0, 0.99, 1.0))
     sclera_shadow = numpy.array((0.83, 0.78, 0.92))
     lash_color = numpy.array((0.20, 0.11, 0.17))
@@ -159,7 +173,7 @@ def paint_eye_texture(path: str, iris_color: tuple, highlight: bool, size: int =
     rim = numpy.clip((iris_distance - 0.82) / 0.18, 0, 1)[..., None]
     iris_fill = iris_fill * (1 - rim * 0.65) + dark[None, None, :] * rim * 0.65
     lower_glow = _soft_step(0.30 - numpy.sqrt(((s_grid - iris_center_s) / 0.20) ** 2 + ((t_grid - 0.20) / 0.13) ** 2), 0.08)[..., None]
-    iris_fill = iris_fill * (1 - lower_glow * 0.5) + numpy.array((1.0, 0.82, 0.98))[None, None, :] * lower_glow * 0.5
+    iris_fill = iris_fill * (1 - lower_glow * 0.5) + numpy.array(tints["glow"])[None, None, :] * lower_glow * 0.5
     color = color * (1 - iris_mask[..., None]) + iris_fill * iris_mask[..., None]
 
     if pupil:
@@ -560,9 +574,9 @@ def _fang_outline(mouth: str) -> list:
     return [(base_x - 0.0022, base_z), (base_x + 0.0022, base_z), (base_x + 0.0004, base_z - 0.0042)]
 
 
-def _face_materials(params, eye_texture_path: str) -> dict:
+def _face_materials(params, eye_texture_path: str, eye_tints: dict) -> dict:
     hair_dark = tuple(channel * 0.78 for channel in hex_to_srgb(params.hair_shade_color))
-    iris_dark = tuple(channel * 0.28 + shade for channel, shade in zip(hex_to_srgb(params.eye_color), (0.12, 0.05, 0.22)))
+    iris_dark = tuple(channel * 0.28 + shade for channel, shade in zip(hex_to_srgb(params.eye_color), eye_tints["pupil"]))
     return {
         FACE: [
             principled("M_Skin", params.skin_color, 0.55),
@@ -581,7 +595,8 @@ def _face_materials(params, eye_texture_path: str) -> dict:
     }
 
 
-def build_face_features(head, params, eye_texture_path: str, shape_keys: list[str] | None = None) -> bpy.types.Object:
+def build_face_features(head, params, eye_texture_path: str, shape_keys: list[str] | None = None,
+                        eye_tints: dict = TARGET_EYE_TINTS) -> bpy.types.Object:
     """Build `<prefix>Face` (the skull plus lids, brows and mouth), `<prefix>Eyes` and `<prefix>Lashes`.
 
     All three carry the same shape keys (`shape_keys`, default all of `FACE_SHAPE_KEYS`), so setting an
@@ -592,7 +607,7 @@ def build_face_features(head, params, eye_texture_path: str, shape_keys: list[st
     builder = _FaceBuilder(head, params)
     neutral = builder.geometry(EXPRESSION_SETTINGS["neutral"])
     keyed = {name: builder.geometry(EXPRESSION_SETTINGS[name]) for name in (shape_keys or FACE_SHAPE_KEYS)}
-    materials = _face_materials(params, eye_texture_path)
+    materials = _face_materials(params, eye_texture_path, eye_tints)
     names = {FACE: f"{params.prefix}Face", EYES: f"{params.prefix}Eyes", LASHES: f"{params.prefix}Lashes"}
     objects = {}
     for group, name in names.items():
