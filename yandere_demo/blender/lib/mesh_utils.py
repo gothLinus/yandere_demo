@@ -418,3 +418,14 @@ def weight_by_segments(mesh_object, armature, vertex_bones: list, blend: float =
             if name not in groups:
                 groups[name] = mesh_object.vertex_groups.get(name) or mesh_object.vertex_groups.new(name=name)
             groups[name].add([vertex.index], weight / total, "REPLACE")
+
+
+def material_center(mesh_object, material_name: str, keep=None) -> Vector:
+    """Mean world position of the rest-pose polygon centres using `material_name` (and accepted by `keep(point)`)."""
+    index = mesh_object.data.materials.find(material_name)
+    centers = [mesh_object.matrix_world @ polygon.center for polygon in mesh_object.data.polygons
+               if index >= 0 and polygon.material_index == index]
+    centers = [point for point in centers if keep is None or keep(point)]
+    if not centers:
+        raise ValueError(f"{mesh_object.name} has no polygons using {material_name}")
+    return sum(centers, Vector()) / len(centers)

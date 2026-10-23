@@ -25,6 +25,9 @@ class CharacterParams:
     body_type: str = "female"
     sock_top_fraction: float = 0.405
     sock_thickness: float = 0.0014
+    sock_color: str = "#f7f5f7"
+    # Subdivision levels of the body and the skull; background characters use fewer.
+    subdivision_levels: int = 2
     extra: dict = field(default_factory=dict)
 
 
@@ -72,13 +75,13 @@ def build_body(armature, params: CharacterParams) -> bpy.types.Object:
     for index, radius in enumerate(radii):
         skin_vertices[index].radius = radius
     skin_vertices[0].use_root = True
-    mesh_utils.add_modifier(body, "SUBSURF", levels=2, render_levels=2)
+    mesh_utils.add_modifier(body, "SUBSURF", levels=params.subdivision_levels, render_levels=params.subdivision_levels)
     mesh_utils.apply_modifiers(body)
     _smooth(body, iterations=2)
     mesh_utils.shade_smooth(body)
 
     body.data.materials.append(principled("M_Skin", params.skin_color, 0.55))
-    body.data.materials.append(principled("M_Sock", "#f7f5f7", 0.7))
+    body.data.materials.append(principled("M_Sock", params.sock_color, 0.7))
     segments = [(points[start], points[end], labels[(start, end)]) for start, end in edges]
     material_indices = []
     for polygon in body.data.polygons:
@@ -142,7 +145,7 @@ def build_socks(body, params: CharacterParams) -> bpy.types.Object:
     bm.to_mesh(socks.data)
     bm.free()
     socks.data.materials.clear()
-    socks.data.materials.append(principled("M_Sock", "#f7f5f7", 0.7))
+    socks.data.materials.append(principled("M_Sock", params.sock_color, 0.7))
     mesh_utils.shade_smooth(socks)
 
     bm = bmesh.new()

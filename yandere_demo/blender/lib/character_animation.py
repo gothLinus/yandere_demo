@@ -223,6 +223,19 @@ class CharacterRig:
         return hip.lerp(knee, self.stance.lap_fraction) + Vector((-side_sign(side) * offset.x, offset.y, offset.z))
 
 
+# How far the palm centre sits from the wrist along the fingers and off the palm.
+PALM_REACH = 0.058
+PALM_DEPTH = 0.016
+
+
+def palm_on(target: Vector, aim: tuple) -> Vector:
+    """Wrist position that puts the palm centre on `target` for a hand aimed by `aim` (chest space)."""
+    fingers = Vector(aim[0]).normalized()
+    palm = Vector(aim[1])
+    palm = (palm - fingers * palm.dot(fingers)).normalized()
+    return target - fingers * PALM_REACH - palm * PALM_DEPTH
+
+
 def lap_pole(side: str) -> Vector:
     return Vector((side_sign(side) * LAP_POLE.x, LAP_POLE.y, LAP_POLE.z))
 

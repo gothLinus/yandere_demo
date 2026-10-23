@@ -14,8 +14,8 @@ from mathutils import Quaternion, Vector
 from . import animation
 from .animation import SIDES, Curve, FootPlacement, GaitParams, WalkCycle, forward_kinematics, side_sign
 from .character_animation import (
-    ArmSpec, BodySpec, CharacterRig, Stance, add_degrees, compose, poses_for, sit_down_curves, sit_transition_body,
-    stand_up_curves,
+    ArmSpec, BodySpec, CharacterRig, Stance, add_degrees, compose, palm_on, poses_for, sit_down_curves,
+    sit_transition_body, stand_up_curves,
 )
 
 WALK = GaitParams(speed=1.3, frame_count=32)
@@ -270,13 +270,10 @@ def clip_drink(rig: CharacterRig, frame: float) -> BodySpec:
 
 BRAID_HOLD_LIFT = Curve([(0, 0.0), (22, 1.0), (112, 1.0), (136, 0.0), (150, 0.0)], period=150.0)
 BRAID_REACH = Curve([(0, 0.0), (14, 0.0), (30, 1.0), (124, 1.0), (140, 0.0), (150, 0.0)], period=150.0)
-# Where along the braid (bone index, fraction along that bone) the hands work, and how far the palm centre
-# sits from the wrist along the fingers and off the palm: the braid lies in the hand, not beside it.
+# Where along the braid (bone index, fraction along that bone) the hands work: the braid lies in the hand.
 BRAID_CRADLE = ("braid_06", 0.4)
 BRAID_STROKE_TOP = ("braid_04", 0.2)
 BRAID_STROKE_BOTTOM = ("braid_06", 0.1)
-PALM_REACH = 0.058
-PALM_DEPTH = 0.016
 RIGHT_BRAID_AIM = ((0.75, 0.40, 0.25), (0.15, 0.45, 0.88))
 LEFT_BRAID_AIM = ((-0.8, 0.30, -0.45), (-0.30, 0.90, 0.20))
 
@@ -286,14 +283,6 @@ def _braid_landmark(rig: CharacterRig, pose, location: tuple) -> Vector:
     skeleton = rig.skeleton
     point = skeleton.heads[bone].lerp(skeleton.tails[bone], fraction)
     return rig.landmark(pose, bone, point)
-
-
-def _palm_on(target: Vector, aim: tuple) -> Vector:
-    """Wrist position that puts the palm centre on `target` for a hand aimed by `aim` (chest space)."""
-    fingers = Vector(aim[0]).normalized()
-    palm = Vector(aim[1])
-    palm = (palm - fingers * palm.dot(fingers)).normalized()
-    return target - fingers * PALM_REACH - palm * PALM_DEPTH
 
 
 STROKE = Curve([(0, 0.0), (30, 0.0), (60, 1.0), (68, 0.5), (76, 0.0), (106, 1.0), (131, 1.0), (150, 0.0)], period=150.0)
@@ -326,12 +315,12 @@ def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
     idle_left = rig.idle_wrists[".L"]
 
     def right_wrist(pose) -> Vector:
-        return idle_right.lerp(_palm_on(_braid_landmark(rig, pose, BRAID_CRADLE), RIGHT_BRAID_AIM), lift)
+        return idle_right.lerp(palm_on(_braid_landmark(rig, pose, BRAID_CRADLE), RIGHT_BRAID_AIM), lift)
 
     def left_wrist(pose) -> Vector:
         top = _braid_landmark(rig, pose, BRAID_STROKE_TOP)
         bottom = _braid_landmark(rig, pose, BRAID_STROKE_BOTTOM)
-        on_braid = _palm_on(top.lerp(bottom, stroke), LEFT_BRAID_AIM)
+        on_braid = palm_on(top.lerp(bottom, stroke), LEFT_BRAID_AIM)
         lifted_off = on_braid + Vector((0.03, -0.05, 0.0)) * math.sin(math.pi * min(1.0, away * 2.0))
         homeward = max(0.0, away * 2.0 - 1.0)
         return lifted_off.lerp(idle_left, homeward * homeward * (3.0 - 2.0 * homeward))

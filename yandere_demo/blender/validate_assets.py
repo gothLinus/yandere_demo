@@ -14,8 +14,11 @@ BLENDER_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 if BLENDER_DIRECTORY not in sys.path:
     sys.path.insert(0, BLENDER_DIRECTORY)
 
-from lib.rig import HUMANOID_BONES, SECONDARY_BONES  # noqa: E402
-from lib.validate import validate_character, validate_target_extras  # noqa: E402
+from lib.rig import (  # noqa: E402
+    AHOGE_BONES, BRAID_BONES, HAIR_FRONT_BONES, HAIR_SIDE_BONES, HUMANOID_BONES, NECKERCHIEF_BONES, PONYTAIL_BONES,
+    SECONDARY_BONES, SKIRT_BONES, SLEEVE_BONES,
+)
+from lib.validate import validate_cast_extras, validate_character, validate_target_extras  # noqa: E402
 
 # The game's five, the ten from spec 4.1b, and the two eye controls.
 FACE_SHAPE_KEYS = [
@@ -55,6 +58,39 @@ TARGET_ACTIONS = {
     "target_idle_confident": (120, True),
 }
 
+PLAYER_ACTIONS = {
+    "player_idle": (90, True),
+    "player_walk": (24, True),
+    "player_run": (20, True),
+    "player_crouch_idle": (90, True),
+    "player_sneak": (32, True),
+    "player_take_photo": (90, True),
+    "player_hide": (20, False),
+    "player_sit": (90, True),
+    "player_sit_down": (30, False),
+    "player_stand_up": (30, False),
+}
+PLAYER_MESHES = ["Body", "Face", "Eyes", "Lashes", "Hair", "Ponytail", "Top", "Neckerchief", "Skirt", "Socks", "Shoes",
+                 "Blush"]
+PLAYER_SKIRT_CLEAR_ACTIONS = ["player_idle", "player_walk", "player_run", "player_sneak", "player_crouch_idle",
+                              "player_take_photo"]
+STUDENT_ACTIONS = {
+    "student_idle": (90, True),
+    "student_walk": (32, True),
+    "student_sit": (90, True),
+    "student_chat": (120, True),
+}
+TEACHER_ACTIONS = {
+    "teacher_idle": (90, True),
+    "teacher_walk": (32, True),
+    "teacher_look_around": (120, True),
+}
+CAST_SHAPE_KEYS = ["neutral", "blink"]
+# 6-10 students are on screen at once; one student with one hair style stays well under the target's ~91k.
+STUDENT_TRIANGLE_BUDGET = 45000
+TEACHER_TRIANGLE_BUDGET = 50000
+STUDENT_ABSENT_BONES = [BRAID_BONES[0], AHOGE_BONES[0], NECKERCHIEF_BONES[0], PONYTAIL_BONES[0]]
+
 CHECKS = {
     "target": {
         "blend": "target.blend",
@@ -63,9 +99,78 @@ CHECKS = {
         "actions": TARGET_ACTIONS,
         "bones": HUMANOID_BONES + SECONDARY_BONES,
         "meshes": TARGET_MESHES,
-        "pleat_count": TARGET_PLEAT_COUNT,
-        "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
-        "braid_clear_actions": BRAID_CLEAR_ACTIONS,
+        "target_extras": {
+            "pleat_count": TARGET_PLEAT_COUNT,
+            "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
+            "braid_clear_actions": BRAID_CLEAR_ACTIONS,
+        },
+    },
+    "player": {
+        "blend": "player.blend",
+        "prefix": "Player",
+        "proxy": "Player-convcol",
+        "shape_keys": FACE_SHAPE_KEYS,
+        "actions": PLAYER_ACTIONS,
+        "bones": (HUMANOID_BONES + PONYTAIL_BONES + HAIR_FRONT_BONES + HAIR_SIDE_BONES + NECKERCHIEF_BONES + SLEEVE_BONES
+                  + SKIRT_BONES),
+        "meshes": PLAYER_MESHES,
+        "cast_extras": {
+            "hair_variants": [],
+            "absent_bones": [BRAID_BONES[0], AHOGE_BONES[0]],
+            "tinted_meshes": [],
+            "required_materials": ["M_UniformNavy", "M_Neckerchief", "M_Hair"],
+            "height": 1.58,
+            "skirt_clear_actions": PLAYER_SKIRT_CLEAR_ACTIONS,
+        },
+    },
+    "student_female": {
+        "blend": "student_female.blend",
+        "prefix": "StudentFemale",
+        "shape_keys": CAST_SHAPE_KEYS,
+        "actions": STUDENT_ACTIONS,
+        "bones": HUMANOID_BONES + SKIRT_BONES,
+        "meshes": ["Body", "Face", "Eyes", "Lashes", "Top", "Neckerchief", "Skirt", "Socks", "Shoes"],
+        "cast_extras": {
+            "hair_variants": ["Hair_bob", "Hair_long", "Hair_twintails"],
+            "absent_bones": STUDENT_ABSENT_BONES,
+            "tinted_meshes": ["Top", "Skirt"],
+            "required_materials": ["M_UniformTint", "M_UniformWhite"],
+            "height": 1.56,
+            "triangle_budget": STUDENT_TRIANGLE_BUDGET,
+            "skirt_clear_actions": ["student_idle", "student_walk", "student_chat"],
+        },
+    },
+    "student_male": {
+        "blend": "student_male.blend",
+        "prefix": "StudentMale",
+        "shape_keys": CAST_SHAPE_KEYS,
+        "actions": STUDENT_ACTIONS,
+        "bones": HUMANOID_BONES,
+        "meshes": ["Body", "Face", "Eyes", "Lashes", "Jacket", "Trousers", "Socks", "Shoes"],
+        "cast_extras": {
+            "hair_variants": ["Hair_short", "Hair_messy"],
+            "absent_bones": STUDENT_ABSENT_BONES + [SKIRT_BONES[0]],
+            "tinted_meshes": ["Jacket", "Trousers"],
+            "required_materials": ["M_UniformTint", "M_UniformButton"],
+            "height": 1.68,
+            "triangle_budget": STUDENT_TRIANGLE_BUDGET,
+        },
+    },
+    "teacher": {
+        "blend": "teacher.blend",
+        "prefix": "Teacher",
+        "shape_keys": CAST_SHAPE_KEYS,
+        "actions": TEACHER_ACTIONS,
+        "bones": HUMANOID_BONES,
+        "meshes": ["Body", "Face", "Eyes", "Lashes", "Hair", "Jacket", "Shirt", "Trousers", "Socks", "Shoes"],
+        "cast_extras": {
+            "hair_variants": [],
+            "absent_bones": STUDENT_ABSENT_BONES + [SKIRT_BONES[0]],
+            "tinted_meshes": [],
+            "required_materials": ["M_Suit", "M_Shirt", "M_Tie"],
+            "height": 1.75,
+            "triangle_budget": TEACHER_TRIANGLE_BUDGET,
+        },
     },
 }
 
@@ -83,9 +188,15 @@ def run_check(check_name: str) -> list[str]:
     if not os.path.exists(blend_path):
         return [f"{check['blend']} does not exist"]
     bpy.ops.wm.open_mainfile(filepath=blend_path)
-    errors = validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"], check["meshes"])
-    return errors + validate_target_extras(check["prefix"], check["shape_keys"], check["pleat_count"],
-                                           check["skirt_clear_actions"], check["braid_clear_actions"])
+    errors = validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"], check["meshes"],
+                                check.get("proxy"))
+    if "target_extras" in check:
+        extras = check["target_extras"]
+        errors += validate_target_extras(check["prefix"], check["shape_keys"], extras["pleat_count"],
+                                         extras["skirt_clear_actions"], extras["braid_clear_actions"])
+    if "cast_extras" in check:
+        errors += validate_cast_extras(check["prefix"], check["shape_keys"], **check["cast_extras"])
+    return errors
 
 
 def main() -> int:

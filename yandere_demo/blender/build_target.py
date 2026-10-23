@@ -16,13 +16,13 @@ if BLENDER_DIRECTORY not in sys.path:
     sys.path.insert(0, BLENDER_DIRECTORY)
 
 from lib import (  # noqa: E402
-    animation, body, character_animation, clothing, export, face, hair, materials, mesh_utils, pleats, rig,
+    animation, body, character_animation, clothing, export, face, hair, materials, mesh_utils, pleats, rig, scene,
     target_animations,
 )
 
 # A live Blender session keeps modules cached between runs; reload so edits take effect.
 for module in (materials, mesh_utils, rig, body, face, pleats, hair, clothing, export, animation, character_animation,
-               target_animations):
+               target_animations, scene):
     importlib.reload(module)
 
 BLEND_PATH = os.path.join(BLENDER_DIRECTORY, "target.blend")
@@ -43,17 +43,6 @@ TARGET_PARAMS = body.CharacterParams(
     sock_top_fraction=0.47,
     extra={"hair_texture": HAIR_TEXTURE_PATH},
 )
-
-
-def reset_scene() -> None:
-    # Right after open_mainfile in the same MCP call the context has no `object`; the view layer always does.
-    active = bpy.context.view_layer.objects.active
-    if active is not None and active.mode != "OBJECT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-    for collection in (bpy.data.objects, bpy.data.meshes, bpy.data.armatures, bpy.data.materials,
-                       bpy.data.images, bpy.data.actions, bpy.data.curves, bpy.data.cameras, bpy.data.lights):
-        for block in list(collection):
-            collection.remove(block)
 
 
 def build_target(params: body.CharacterParams) -> bpy.types.Object:
@@ -82,15 +71,10 @@ def build_target(params: body.CharacterParams) -> bpy.types.Object:
 
 
 def main() -> None:
-    reset_scene()
-    scene = bpy.context.scene
-    scene.render.fps = animation.FPS
-    scene.render.fps_base = 1.0
+    scene.start_character_scene()
     armature = build_target(TARGET_PARAMS)
     target_animations.build_target_actions(armature)
-    bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
-    export.export_glb(GLB_PATH, [armature])
-    print(f"built {armature.name}: {BLEND_PATH}, {GLB_PATH}")
+    scene.save_and_export(armature, BLEND_PATH, GLB_PATH)
 
 
 # blender-mcp's exec(source, {"__file__": path}) leaves __name__ as "builtins".

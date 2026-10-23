@@ -12,7 +12,7 @@ from mathutils import Matrix, Vector
 from . import mesh_utils, pleats
 from .face import HEAD_SCALE, head_center
 from .materials import hex_to_srgb, principled
-from .rig import BRAID_BONES, BRAID_BOW_BONE, add_bone, add_chain
+from .rig import BRAID_BONES, BRAID_BOW_BONE, PONYTAIL_BONES, add_bone, add_chain
 
 HAIR_RADII = Vector((0.099, 0.099, 0.116))
 HAIR_BACK_DEPTH = 0.112
@@ -148,11 +148,18 @@ def _strand_geometry(center: Vector, strand: Strand):
 
 
 def _layout_strands(params, seed: int = 7) -> dict:
+    """Strand groups ("bangs", "sides", "back", "inner", "crown") of `params.hair_style`."""
+    if params.hair_style not in HAIR_LAYOUTS:
+        raise ValueError(f"unknown hair_style {params.hair_style!r}; supported: {sorted(HAIR_LAYOUTS)}")
     generator = random.Random(seed)
 
     def jitter(amount: float) -> float:
         return generator.uniform(-amount, amount)
 
+    return HAIR_LAYOUTS[params.hair_style](jitter)
+
+
+def _target_layout(jitter) -> dict:
     bangs = [
         Strand(-66, 99, 0.034, 0.050, scale=1.03, tip_bend=0.004, sway=4),
         Strand(-48, 97, 0.016, 0.044, scale=1.045, sway=-3),
@@ -203,6 +210,124 @@ def _layout_strands(params, seed: int = 7) -> dict:
     return {"bangs": bangs, "sides": sides, "back": back, "inner": inner, "crown": crown}
 
 
+def _fringe(jitter, hang: float, theta_end: float = 93.0, width: float = 0.046, count: int = 9,
+            tip_bend: float = 0.004) -> list:
+    """An even fringe across the forehead; the outer locks run longer down the temples."""
+    strands = []
+    for index in range(count):
+        edge = abs(2.0 * index / (count - 1) - 1.0)
+        phi = -66.0 + 132.0 * index / (count - 1) + jitter(3)
+        strands.append(Strand(phi, theta_end + 6.0 * edge + jitter(1.5), hang * (0.5 + edge) + jitter(0.003),
+                              width + jitter(0.004), scale=1.055 - 0.025 * edge, curl=-0.004, tip_bend=tip_bend * edge,
+                              theta_start=12, sway=jitter(5)))
+    return strands
+
+
+def _side_locks(jitter, hang: float, flare: float, phis=(62.0, 76.0, 90.0, 104.0, 118.0), tip_bend: float = 0.008,
+                theta_end: float = 97.0) -> list:
+    strands = []
+    for sign in (-1.0, 1.0):
+        for phi in phis:
+            strands.append(Strand(sign * (phi + jitter(3)), theta_end + jitter(1.5), hang + jitter(0.01) if hang else 0.0,
+                                  0.064 + jitter(0.004), scale=1.05 + jitter(0.01), flare=flare, curl=0.008,
+                                  tip_bend=tip_bend, sway=jitter(4)))
+    return strands
+
+
+def _back_layer(jitter, hang: float, flare: float, theta_end: float = 100.0, tip_bend: float = 0.018,
+                count: int = 11, phi_start: float = 112.0) -> list:
+    """Locks around the back of the head from `phi_start` to the mirrored side."""
+    strands = []
+    for index in range(count):
+        phi = phi_start + index * (360.0 - 2.0 * phi_start) / (count - 1) + jitter(3)
+        strands.append(Strand(phi, theta_end + jitter(3), hang + jitter(0.01) if hang else 0.0, 0.064 + jitter(0.006),
+                              scale=1.04 + jitter(0.01), flare=flare + jitter(0.008), curl=0.004,
+                              tip_bend=tip_bend + jitter(0.006), sway=jitter(6)))
+    return strands
+
+
+def _inner_layer(jitter, hang: float, count: int = 14, phi_start: float = 70.0) -> list:
+    """The darker under-layer, from `phi_start` round the back to the mirrored side."""
+    return [Strand(phi_start + index * (360.0 - 2.0 * phi_start) / (count - 1) + jitter(3), 100, hang + jitter(0.01), 0.07,
+                   material=HAIR_SHADE, scale=0.985, flare=0.015, tip_bend=0.008, sway=jitter(5)) for index in range(count)]
+
+
+def _crown(jitter, count: int = 7, tip_bend: float = -0.006) -> list:
+    return [Strand(-150 + index * 300.0 / (count - 1) + jitter(8), 70 + jitter(6), 0.0, 0.07, scale=1.06, theta_start=4,
+                   tip_bend=tip_bend, sway=jitter(8)) for index in range(count)]
+
+
+def _with_clusters(layout: dict) -> dict:
+    """Hand the fringe to the `hair_front_*` chains and the side locks to the `hair_side_*` chains."""
+    for strand in layout["bangs"]:
+        strand.cluster = front_cluster(strand.phi)
+    for strand in layout["sides"]:
+        strand.cluster = "hair_side_L" if strand.phi > 0 else "hair_side_R"
+    return layout
+
+
+def _ponytail_layout(jitter) -> dict:
+    """Hair drawn back into a high ponytail, with long face-framing locks at the temples."""
+    sides = _side_locks(jitter, 0.13, 0.008, phis=(60.0, 70.0), tip_bend=0.004)
+    sides += _side_locks(jitter, 0.03, 0.006, phis=(84.0, 98.0), tip_bend=0.002)
+    # Short locks reach down to the nape, so the drawn-back hair hides the back of the skull.
+    back = _back_layer(jitter, 0.025, 0.004, theta_end=126.0, tip_bend=0.006, count=15, phi_start=96.0)
+    return _with_clusters({"bangs": _fringe(jitter, 0.012), "sides": sides, "back": back, "inner": [],
+                           "crown": _crown(jitter)})
+
+
+def _bob_layout(jitter) -> dict:
+    return {"bangs": _fringe(jitter, 0.014), "sides": _side_locks(jitter, 0.085, 0.012, tip_bend=0.012),
+            "back": _back_layer(jitter, 0.095, 0.02, tip_bend=0.016), "inner": _inner_layer(jitter, 0.08),
+            "crown": _crown(jitter)}
+
+
+def _long_layout(jitter) -> dict:
+    """Locks framing the face end above the shoulders; the length falls down the back, behind them."""
+    return {"bangs": _fringe(jitter, 0.016),
+            "sides": _side_locks(jitter, 0.11, 0.02, phis=(62.0, 76.0, 90.0), tip_bend=0.01),
+            "back": _back_layer(jitter, 0.33, 0.05, tip_bend=0.02, count=13, phi_start=102.0),
+            "inner": _inner_layer(jitter, 0.30, count=11, phi_start=110.0), "crown": _crown(jitter)}
+
+
+def _twintails_layout(jitter) -> dict:
+    """Short hair under the two tails; `build_hair` adds the tails themselves."""
+    return {"bangs": _fringe(jitter, 0.012), "sides": _side_locks(jitter, 0.05, 0.01, tip_bend=0.006),
+            "back": _back_layer(jitter, 0.03, 0.006, theta_end=124.0, tip_bend=0.006, count=14, phi_start=100.0),
+            "inner": _inner_layer(jitter, 0.025),
+            "crown": _crown(jitter)}
+
+
+def _short_male_layout(jitter) -> dict:
+    return {"bangs": _fringe(jitter, 0.006, theta_end=88.0, width=0.05, count=7),
+            "sides": _side_locks(jitter, 0.0, 0.0, phis=(70.0, 86.0, 102.0, 116.0), tip_bend=0.004, theta_end=99.0),
+            "back": _back_layer(jitter, 0.025, 0.004, theta_end=124.0, tip_bend=0.006, count=14, phi_start=100.0),
+            "inner": [],
+            "crown": _crown(jitter)}
+
+
+def _messy_male_layout(jitter) -> dict:
+    """Short hair whose tips flick outward in spikes."""
+    return {"bangs": _fringe(jitter, 0.014, theta_end=89.0, width=0.036, count=9, tip_bend=0.010),
+            "sides": _side_locks(jitter, 0.02, 0.022, phis=(68.0, 82.0, 96.0, 110.0), tip_bend=0.014, theta_end=97.0),
+            "back": _back_layer(jitter, 0.035, 0.03, theta_end=120.0, tip_bend=0.022, count=14, phi_start=100.0),
+            "inner": [],
+            "crown": _crown(jitter, count=11, tip_bend=-0.02)}
+
+
+HAIR_LAYOUTS = {
+    "target": _target_layout,
+    "ponytail": _ponytail_layout,
+    "bob": _bob_layout,
+    "long": _long_layout,
+    "twintails": _twintails_layout,
+    "short_male": _short_male_layout,
+    "messy_male": _messy_male_layout,
+}
+# Only the target's style has the ahoge (its chain and its lock).
+AHOGE_STYLES = ("target",)
+
+
 def paint_hair_texture(path: str, params, width: int = 64, height: int = 256) -> bpy.types.Image:
     """Base colour along a lock (v 1 at the root, 0 at the tip): shade at the roots, the hair colour through the
     middle, a slightly lighter tip, and faint strand lines across the lock. The shine band is added in Godot."""
@@ -248,12 +373,16 @@ def front_cluster(phi: float) -> str:
     return "hair_front_C"
 
 
+HAIR_TIE = 3
+
+
 def _hair_materials(params, hair_texture_path: str | None = None) -> list:
     return [
         principled("M_Hair", "#ffffff" if hair_texture_path else params.hair_color, 0.5, hair_texture_path,
                    texture_alpha=False),
         principled("M_HairShade", params.hair_shade_color, 0.5),
         principled("M_HairStreak", params.hair_streak_color, 0.5),
+        principled("M_HairTie", params.extra.get("hair_tie_color", "#2b2b38"), 0.5),
     ]
 
 
@@ -290,6 +419,8 @@ def build_bangs(head, params) -> bpy.types.Object:
     center = head_center(armature)
     layout = _layout_strands(params)
     bangs = _strands_object(f"{params.prefix}Bangs", center, layout["bangs"] + layout["crown"], params, armature)
+    if params.hair_style not in AHOGE_STYLES:
+        return bangs
     ahoge = _ahoge(center, params, armature)
     return mesh_utils.join_objects(f"{params.prefix}Bangs", [bangs, ahoge])
 
@@ -359,20 +490,25 @@ def _ahoge(center: Vector, params, armature) -> bpy.types.Object:
     return ahoge
 
 
-def build_hair(head, armature, params) -> bpy.types.Object:
+def build_hair(head, armature, params, name: str | None = None) -> bpy.types.Object:
+    """`name` (default `<prefix>Hair`) lets one character carry several swappable styles."""
     parts = [build_hair_cap(head, params), build_bangs(head, params), build_side_hair(head, params)]
-    hair_object = mesh_utils.join_objects(f"{params.prefix}Hair", parts)
+    if params.hair_style == "twintails":
+        parts += [_tail_object(f"{params.prefix}Twintail{side}", twintail_points(armature, sign), params, armature,
+                               ["head"]) for side, sign in (("L", 1.0), ("R", -1.0))]
+    hair_object = mesh_utils.join_objects(name or f"{params.prefix}Hair", parts)
     mesh_utils.shade_smooth(hair_object)
     mesh_utils.parent_to_armature(hair_object, armature)
     return hair_object
 
 
 def add_hair_chains(armature, params) -> list:
-    """Bone chains for the ahoge, the three bang clusters and the two side locks, laid along their locks."""
+    """Bone chains for the ahoge (target style only), the three bang clusters and the two side locks."""
     center = head_center(armature)
     names = []
-    ahoge = ahoge_points(center, 9)
-    names += add_chain(armature, "ahoge", "head", [ahoge[0], ahoge[3], ahoge[6], ahoge[9]])
+    if params.hair_style in AHOGE_STYLES:
+        ahoge = ahoge_points(center, 9)
+        names += add_chain(armature, "ahoge", "head", [ahoge[0], ahoge[3], ahoge[6], ahoge[9]])
     for cluster, phi in (("L", 40.0), ("C", 2.0), ("R", -40.0)):
         path = _strand_path(center, Strand(phi, 97, 0.014, 0.04, scale=1.05, theta_start=12))
         names += add_chain(armature, f"hair_front_{cluster}", "head", [path[6], path[10], path[-1]])
@@ -613,5 +749,99 @@ def bow_parts(params, armature) -> tuple[list, list]:
     return head_parts, braid_parts
 
 
-def build_ponytail(*arguments, **keywords):
-    raise NotImplementedError("build_ponytail is implemented for the player in Task 10")
+# Tails (ponytail, twintails): locks around a centre line that swell below the tie and taper to the tip.
+TAIL_LOCKS = 9
+TAIL_CORE_LOCKS = 5
+TAIL_SAMPLES = 16
+TAIL_TWIST = 0.8
+
+
+def ponytail_points(armature) -> list:
+    """Centre line of a high ponytail tied at the back of the crown, falling to the shoulder blades."""
+    root = surface_point(head_center(armature), 64, 180, 1.0)
+    return [root, root + Vector((0, 0.045, 0.004)), root + Vector((0, 0.07, -0.07)), root + Vector((0, 0.06, -0.2)),
+            root + Vector((0, 0.045, -0.32))]
+
+
+def twintail_points(armature, sign: float) -> list:
+    """Centre line of one twintail (sign +1 the character's left), tied high behind the ear."""
+    center = head_center(armature)
+    root = surface_point(center, 60, sign * 118, 1.0)
+    outward = Vector((root.x - center.x, root.y - center.y, 0.0)).normalized()
+    return [root, root + outward * 0.04 + Vector((0, 0, 0.006)), root + outward * 0.065 + Vector((0, 0, -0.06)),
+            root + outward * 0.06 + Vector((0, 0.01, -0.18)), root + outward * 0.05 + Vector((0, 0.02, -0.3))]
+
+
+def add_ponytail_chain(armature) -> list:
+    """`ponytail_01..04` from the tie to the tip."""
+    curve = _smooth_curve(ponytail_points(armature), TAIL_SAMPLES)
+    return add_chain(armature, "ponytail", "head", [curve[index] for index in (0, 4, 8, 12, 16)])
+
+
+def build_ponytail(armature, params) -> bpy.types.Object:
+    """`<prefix>Ponytail`, skinned to the head at the tie and to `ponytail_01..04` along the tail."""
+    tail = _tail_object(f"{params.prefix}Ponytail", ponytail_points(armature), params, armature,
+                        ["head"] + PONYTAIL_BONES)
+    mesh_utils.shade_smooth(tail)
+    return tail
+
+
+def _smooth_curve(points: list, samples: int) -> list:
+    dense = []
+    for index in range(len(points) - 1):
+        before = points[max(index - 1, 0)]
+        after = points[min(index + 2, len(points) - 1)]
+        dense += [_catmull_rom(before, points[index], points[index + 1], after, step / 8) for step in range(8)]
+    dense.append(points[-1])
+    return _resample(dense, samples)
+
+
+def _tail_radius(fraction: float) -> float:
+    swell = math.sin(0.5 * math.pi * min(1.0, fraction / 0.3))
+    return (0.006 + 0.03 * swell) * (1.0 - fraction) ** 0.6 + 0.002
+
+
+def _tail_object(name: str, points: list, params, armature, bone_names: list) -> bpy.types.Object:
+    curve = _smooth_curve(points, TAIL_SAMPLES)
+    frames = mesh_utils.frame_along(curve)
+    count = len(curve)
+    parts = []
+    for locks, depth, material in ((TAIL_LOCKS, 1.0, HAIR), (TAIL_CORE_LOCKS, 0.55, HAIR_SHADE)):
+        for lock in range(locks):
+            points_along, widths, normals = [], [], []
+            for index, point in enumerate(curve):
+                fraction = index / (count - 1)
+                _, normal, binormal = frames[index]
+                angle = 2 * math.pi * lock / locks + TAIL_TWIST * fraction
+                radial = normal * math.cos(angle) + binormal * math.sin(angle)
+                radius = _tail_radius(fraction) * depth
+                points_along.append(point + radial * radius)
+                normals.append(radial)
+                widths.append(2 * math.pi * radius / locks * 1.7 + 0.002)
+            vertices, faces = ribbon(points_along, widths, normals)
+            vertex_uvs = [(across, 1.0 - index / (count - 1)) for index in range(count) for across in (0.0, 0.5, 1.0)]
+            parts.append((vertices, faces, material, vertex_uvs))
+    tie_vertices, tie_faces = _tie_ring(curve[1], frames[1])
+    parts.append((tie_vertices, tie_faces, HAIR_TIE, [(0.5, 0.5)] * len(tie_vertices)))
+    vertices, faces, material_indices, uvs = mesh_utils.merge_geometry_with_uvs(parts)
+    tail = mesh_utils.mesh_from_geometry(name, vertices, faces, _hair_materials(params, params.extra.get("hair_texture")),
+                                         material_indices, uvs)
+    mesh_utils.add_modifier(tail, "SOLIDIFY", thickness=STRAND_THICKNESS, offset=-1.0, use_even_offset=True)
+    mesh_utils.apply_modifiers(tail)
+    mesh_utils.recalculate_normals(tail)
+    mesh_utils.assign_nearest_bone_weights(tail, armature, bone_names, blend=0.04)
+    return tail
+
+
+def _tie_ring(center: Vector, frame: tuple):
+    """A small scrunchie around the tail just below the tie."""
+    tangent, normal, binormal = frame
+    rings = []
+    for major in range(16):
+        major_angle = 2 * math.pi * major / 16
+        radial = normal * math.cos(major_angle) + binormal * math.sin(major_angle)
+        ring_center = center + radial * 0.013
+        minor_angles = [2 * math.pi * minor / 8 for minor in range(8)]
+        rings.append([ring_center + (radial * math.cos(angle) + tangent * math.sin(angle)) * 0.0065 for angle in minor_angles])
+    rings.append(rings[0])
+    return mesh_utils.loft(rings)

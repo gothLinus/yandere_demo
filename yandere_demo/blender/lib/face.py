@@ -81,7 +81,7 @@ def build_head(armature, params) -> bpy.types.Object:
         faces.append((chin_index, last + column, last + following))
     head = mesh_utils.mesh_from_geometry(f"{params.prefix}Head", vertices, faces, [principled("M_Skin", params.skin_color, 0.55)])
     mesh_utils.recalculate_normals(head)
-    mesh_utils.add_modifier(head, "SUBSURF", levels=2, render_levels=2)
+    mesh_utils.add_modifier(head, "SUBSURF", levels=params.subdivision_levels, render_levels=params.subdivision_levels)
     mesh_utils.apply_modifiers(head)
     _add_nose(head, center)
     mesh_utils.shade_smooth(head)
@@ -581,16 +581,17 @@ def _face_materials(params, eye_texture_path: str) -> dict:
     }
 
 
-def build_face_features(head, params, eye_texture_path: str) -> bpy.types.Object:
+def build_face_features(head, params, eye_texture_path: str, shape_keys: list[str] | None = None) -> bpy.types.Object:
     """Build `<prefix>Face` (the skull plus lids, brows and mouth), `<prefix>Eyes` and `<prefix>Lashes`.
 
-    All three carry the same shape keys, so setting an expression by name moves every part of it. The skull
-    `head` is joined into the face and no longer exists afterwards.
+    All three carry the same shape keys (`shape_keys`, default all of `FACE_SHAPE_KEYS`), so setting an
+    expression by name moves every part of it. The skull `head` is joined into the face and no longer exists
+    afterwards.
     """
     armature = head.parent
     builder = _FaceBuilder(head, params)
     neutral = builder.geometry(EXPRESSION_SETTINGS["neutral"])
-    keyed = {name: builder.geometry(EXPRESSION_SETTINGS[name]) for name in FACE_SHAPE_KEYS}
+    keyed = {name: builder.geometry(EXPRESSION_SETTINGS[name]) for name in (shape_keys or FACE_SHAPE_KEYS)}
     materials = _face_materials(params, eye_texture_path)
     names = {FACE: f"{params.prefix}Face", EYES: f"{params.prefix}Eyes", LASHES: f"{params.prefix}Lashes"}
     objects = {}

@@ -5,6 +5,8 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 PROXY_MATERIAL_NAME = "M_CollisionProxy"
+# Godot's import suffixes for a trimesh and a convex collision proxy.
+PROXY_SUFFIXES = ("-col", "-convcol")
 IDENTITY_TOLERANCE = 1e-5
 LOOP_SEAM_TOLERANCE = 1e-4
 ANIMATION_FPS = 30
@@ -16,11 +18,12 @@ def validate_character(
     required_actions: dict[str, tuple[int, bool]],
     required_bones: list[str],
     required_meshes: list[str] | None = None,
+    proxy_name: str | None = None,
 ) -> list[str]:
     """Return error strings.
 
     `required_actions` maps action name to (frame count, loops). `required_meshes` are part names,
-    checked as f"{prefix}{part}" mesh children.
+    checked as f"{prefix}{part}" mesh children. `proxy_name` defaults to f"{prefix}-col".
     """
     errors: list[str] = []
     armature = bpy.data.objects.get(f"{prefix}Char")
@@ -38,7 +41,7 @@ def validate_character(
             errors.append(f"mesh {prefix}{part} is missing or not parented to {armature.name}")
 
     errors.extend(_validate_face(prefix, required_shape_keys))
-    errors.extend(_validate_collision_proxy(prefix, armature))
+    errors.extend(_validate_collision_proxy(proxy_name or f"{prefix}-col", armature))
     errors.extend(_validate_meshes(armature))
 
     errors.extend(_validate_actions(armature, required_actions))
@@ -94,11 +97,11 @@ def _validate_face(prefix: str, required_shape_keys: list[str]) -> list[str]:
     return []
 
 
-def _validate_collision_proxy(prefix: str, armature) -> list[str]:
+def _validate_collision_proxy(proxy_name: str, armature) -> list[str]:
     errors: list[str] = []
-    proxy = bpy.data.objects.get(f"{prefix}-col")
+    proxy = bpy.data.objects.get(proxy_name)
     if proxy is None:
-        return [f"collision proxy {prefix}-col is missing"]
+        return [f"collision proxy {proxy_name} is missing"]
     if proxy.parent != armature:
         errors.append(f"{proxy.name} must be parented to {armature.name}")
     if proxy.parent_bone:
@@ -125,7 +128,7 @@ def _validate_meshes(armature) -> list[str]:
         unapplied = [modifier.name for modifier in mesh_object.modifiers if modifier.type != "ARMATURE"]
         if unapplied:
             errors.append(f"{mesh_object.name} has unapplied modifiers {unapplied}")
-        if mesh_object.name.endswith("-col"):
+        if mesh_object.name.endswith(PROXY_SUFFIXES):
             continue
         if not any(modifier.type == "ARMATURE" for modifier in mesh_object.modifiers):
             errors.append(f"{mesh_object.name} is not skinned to {armature.name}")
@@ -144,6 +147,8 @@ def _is_identity(matrix) -> bool:
 
 
 HEAD_RATIO_RANGE = (6.5, 7.0)
+TINT_MATERIAL_NAME = "M_UniformTint"
+HEIGHT_TOLERANCE = 0.005
 SHOULDER_TO_HIP_LIMIT = 1.05
 TORSO_GROUPS = {"hips", "spine", "thigh.L", "thigh.R"}
 ZERO_AREA = 1e-10
@@ -187,6 +192,78 @@ def validate_target_extras(prefix: str, shape_keys: list[str], pleat_count: int,
                 errors.append(f"{body.name} has no weights for {finger_tip}")
         errors.extend(_validate_silhouette(prefix, body))
     return errors
+
+
+def validate_cast_extras(prefix: str, shape_keys: list[str], hair_variants: list[str], absent_bones: list[str],
+                         tinted_meshes: list[str], required_materials: list[str], height: float,
+                         triangle_budget: int | None = None, skirt_clear_actions: list[str] | None = None) -> list[str]:
+    """Checks for the supporting cast: shape keys on the eyes and lashes, swappable hair meshes named exactly,
+    bones that must not exist, meshes using a tintable material, required material names, the character's
+    height, a triangle budget for one visible outfit (one hair variant shown), skinned fingers, and no leg
+    poking through the skirt in `skirt_clear_actions`."""
+    errors: list[str] = []
+    armature = bpy.data.objects.get(f"{prefix}Char")
+    if armature is None:
+        return [f"armature {prefix}Char is missing"]
+    for part in ("Eyes", "Lashes"):
+        errors.extend(_validate_shape_keys(f"{prefix}{part}", shape_keys))
+    for variant in hair_variants:
+        hair = bpy.data.objects.get(variant)
+        if hair is None or hair.type != "MESH" or hair.parent != armature:
+            errors.append(f"hair mesh {variant} is missing or not parented to {armature.name}")
+        elif "M_Hair" not in [slot.material.name for slot in hair.material_slots if slot.material]:
+            errors.append(f"{variant} does not use M_Hair")
+    bone_names = {bone.name for bone in armature.data.bones}
+    for bone_name in absent_bones:
+        if bone_name in bone_names:
+            errors.append(f"bone {bone_name} must not exist on {armature.name}")
+    for part in tinted_meshes:
+        mesh_object = bpy.data.objects.get(f"{prefix}{part}")
+        names = [slot.material.name for slot in mesh_object.material_slots if slot.material] if mesh_object else []
+        if TINT_MATERIAL_NAME not in names:
+            errors.append(f"{prefix}{part} does not use {TINT_MATERIAL_NAME}")
+    used_materials = {slot.material.name for child in armature.children if child.type == "MESH"
+                      for slot in child.material_slots if slot.material}
+    for material_name in required_materials:
+        if material_name not in used_materials:
+            errors.append(f"no mesh of {armature.name} uses {material_name}")
+    crown = (armature.matrix_world @ armature.data.bones["head"].tail_local).z
+    if abs(crown - height) > HEIGHT_TOLERANCE:
+        errors.append(f"{armature.name} is {crown:.3f} m tall, expected {height:.3f} m")
+    if triangle_budget is not None:
+        triangles = visible_triangles(armature, hair_variants)
+        if triangles > triangle_budget:
+            errors.append(f"{armature.name} shows {triangles} triangles, over the budget of {triangle_budget}")
+    body = bpy.data.objects.get(f"{prefix}Body")
+    if body is not None:
+        group_names = {group.name for group in body.vertex_groups}
+        for finger_tip in ("thumb_03.L", "index_03.L", "pinky_03.R"):
+            if finger_tip not in group_names:
+                errors.append(f"{body.name} has no weights for {finger_tip}")
+    for action_name in skirt_clear_actions or []:
+        if bpy.data.actions.get(action_name) is None:
+            continue
+        pokes = [(frame, count, depth) for frame, count, depth in skirt_penetrations(prefix, action_name) if count]
+        if pokes:
+            frame, count, depth = max(pokes, key=lambda item: item[2])
+            errors.append(f"{action_name}: legs poke through the skirt in {len(pokes)} frames "
+                          f"(worst frame {frame}: {count} vertices, {depth * 1000:.1f} mm)")
+    return errors
+
+
+def visible_triangles(armature, hair_variants: list[str]) -> int:
+    """Triangles of every mesh under the armature with only the largest hair variant counted (one is shown)."""
+    total = 0
+    variant_triangles = [0]
+    for child in armature.children:
+        if child.type != "MESH" or child.name.endswith(PROXY_SUFFIXES):
+            continue
+        triangles = sum(len(polygon.vertices) - 2 for polygon in child.data.polygons)
+        if child.name in hair_variants:
+            variant_triangles.append(triangles)
+        else:
+            total += triangles
+    return total + max(variant_triangles)
 
 
 def _validate_shape_keys(object_name: str, required: list[str]) -> list[str]:
@@ -251,6 +328,8 @@ SKIRT_PENETRATION_TOLERANCE = 0.003
 SKIRT_HEM_FRACTION = 0.9
 # A poke is a leg vertex just outside the fabric; anything further away is leg showing below the hem.
 SKIRT_POKE_RANGE = 0.04
+# A ray this steeply downward leaves through the hem opening: that skin is only seen from beneath the skirt.
+SKIRT_OPENING_SLOPE = 0.6
 
 
 def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, float]]:
@@ -299,10 +378,15 @@ def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, fl
                 point = leg.matrix_world @ leg_mesh.vertices[index].co
                 start, end = bones[bone_name]
                 segment = end - start
-                along = max(0.0, min(1.0, (point - start).dot(segment) / segment.length_squared))
+                along = (point - start).dot(segment) / segment.length_squared
+                if along <= 0.0:
+                    # Above the hip joint (the crease of a raised thigh) a leg has no radial direction: the ray would
+                    # run up inside the torso. That skin sits under the skirt's waist.
+                    continue
+                along = min(1.0, along)
                 direction = point - (start + segment * along)
                 length = direction.length
-                if length < 1e-6:
+                if length < 1e-6 or direction.z < -SKIRT_OPENING_SLOPE * length:
                     continue
                 # Covered when the skirt lies further out along the ray from the body axis through the vertex.
                 hit, _, _, _ = tree.ray_cast(point, direction / length, 1.0)

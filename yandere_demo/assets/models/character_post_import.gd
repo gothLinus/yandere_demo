@@ -4,6 +4,8 @@ extends EditorScenePostImport
 # Bangs sit a few centimetres in front of the face; their cast shadow would cut a hard band across it.
 # The blush is a transparent overlay. Matches TargetHair, Hair_bob, Bow_left, TargetBlush and similar names.
 const SHADOWLESS_NAME_PARTS: Array[String] = ["Hair", "Bow", "Blush"]
+# Swappable hair styles (Hair_bob, Hair_short, ...): only the first stays visible; the game picks one per character.
+const HAIR_VARIANT_PATTERN: String = "Hair_*"
 # Every other imported clip loops; glTF carries no loop flag.
 const ONE_SHOT_ANIMATIONS: Array[StringName] = [
 	&"target_notice_player",
@@ -23,8 +25,15 @@ func _post_import(scene: Node) -> Object:
 		for name_part: String in SHADOWLESS_NAME_PARTS:
 			if String(instance.name).contains(name_part):
 				instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_show_first_hair_variant(scene)
 	_set_loop_modes(scene)
 	return scene
+
+
+func _show_first_hair_variant(scene: Node) -> void:
+	var variants: Array[Node] = scene.find_children(HAIR_VARIANT_PATTERN, "MeshInstance3D", true, false)
+	for index: int in variants.size():
+		(variants[index] as MeshInstance3D).visible = index == 0
 
 
 func _set_loop_modes(scene: Node) -> void:

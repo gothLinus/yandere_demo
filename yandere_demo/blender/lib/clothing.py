@@ -14,8 +14,19 @@ from . import hair, pleats
 from .rig import SLEEVE_BONES, add_bone, add_chain, bone_world_points
 
 UNIFORM_COLORS = {
-    "sailor_red": {"main": "#f7f5f8", "accent": "#c9505c", "accent_material": "M_UniformRed", "neckerchief": "#f39fae"},
-    "sailor_navy": {"main": "#f4f4f6", "accent": "#26304f", "accent_material": "M_UniformNavy", "neckerchief": "#b8243a"},
+    "sailor_red": {"main": "#f7f5f8", "accent": "#c9505c", "accent_material": "M_UniformRed", "neckerchief": "#f39fae",
+                   "shoe": "#6b4332"},
+    "sailor_navy": {"main": "#f4f4f6", "accent": "#26304f", "accent_material": "M_UniformNavy", "neckerchief": "#b8243a",
+                    "shoe": "#6b4332"},
+    # Background students: Godot recolours M_UniformTint per instance, so its own colour is only the default.
+    "sailor_tint": {"main": "#f4f4f6", "accent": "#34405e", "accent_material": "M_UniformTint", "neckerchief": "#c7454f",
+                    "shoe": "#6b4332"},
+}
+# Tailored outfits as (material name, sRGB hex) per part.
+TAILORED_UNIFORMS = {
+    "gakuran": {"cloth": ("M_UniformTint", "#1f2433"), "trim": ("M_UniformButton", "#d9b45a"), "shoe": "#2a211d"},
+    "suit": {"cloth": ("M_Suit", "#3b4048"), "trim": ("M_SuitButton", "#22252b"), "shirt": ("M_Shirt", "#f2f3f5"),
+             "tie": ("M_Tie", "#7a2433"), "shoe": "#1d1a19"},
 }
 
 REFERENCE_HEIGHT = 1.58
@@ -35,16 +46,19 @@ SLEEVE_BONE_START = 0.22
 WHITE = 0
 ACCENT = 1
 NECKERCHIEF = 2
-SHOE = 3
-SOLE = 4
+SHOE = 0
+SOLE = 1
 
 
 def _uniform_colors(uniform: str) -> dict:
-    if uniform == "suit":
-        raise NotImplementedError("the suit uniform is implemented for the teacher in Task 10")
     if uniform not in UNIFORM_COLORS:
-        raise ValueError(f"unknown uniform {uniform!r}; supported: {sorted(UNIFORM_COLORS)} and 'suit' (Task 10)")
+        raise ValueError(f"unknown sailor uniform {uniform!r}; supported: {sorted(UNIFORM_COLORS)}")
     return UNIFORM_COLORS[uniform]
+
+
+def _shoe_materials(params) -> list:
+    colors = TAILORED_UNIFORMS.get(params.uniform) or _uniform_colors(params.uniform)
+    return [principled("M_Shoe", colors["shoe"], 0.4), principled("M_ShoeSole", "#3a2620", 0.6)]
 
 
 def _uniform_materials(params) -> list:
@@ -53,8 +67,6 @@ def _uniform_materials(params) -> list:
         principled("M_UniformWhite", colors["main"], 0.7),
         principled(colors["accent_material"], colors["accent"], 0.65),
         principled("M_Neckerchief", colors["neckerchief"], 0.6),
-        principled("M_Shoe", "#6b4332", 0.4),
-        principled("M_ShoeSole", "#3a2620", 0.6),
     ]
 
 
@@ -304,6 +316,15 @@ class _Surface:
             normal = -normal
         return location + normal * offset, normal
 
+    def front(self, x: float, z: float, offset: float) -> tuple:
+        """The first surface point seen from straight in front at (x, z), pushed out along its normal."""
+        location, normal, _, _ = self.tree.ray_cast(Vector((x, -1.0, z)), Vector((0.0, 1.0, 0.0)))
+        if location is None:
+            return self.place(Vector((x, -0.3, z)), offset)
+        if normal.y > 0.0:
+            normal = -normal
+        return location + normal * offset, normal
+
 
 def _collar_keys(neck_base: Vector, v_point: Vector, shoulder: Vector, back_bottom_z: float) -> tuple:
     """Matching inner (neckline) and outer (collar edge) key points for the character's right half."""
@@ -393,8 +414,9 @@ def _orient_away_from_body(mesh_object, armature) -> None:
 NECKERCHIEF_TAIL_ROOT_SHARE = 0.2
 
 
-def build_neckerchief(top, collar, params, armature) -> bpy.types.Object:
-    """The pink knot, the V fill inside the collar and two tails; each tail hangs on its `neckerchief_<side>` chain."""
+def build_neckerchief(top, collar, params, armature, tail_chains: bool = True) -> bpy.types.Object:
+    """The knot, the V fill inside the collar and two tails; with `tail_chains` each tail hangs on its
+    `neckerchief_<side>` chain, otherwise the tails ride on the chest."""
     surface = _Surface(top)
     v_point = Vector(collar["v_point"])
     knot_center, knot_normal = surface.place(v_point + Vector((0, 0, -0.012)), 0.012)
@@ -412,7 +434,8 @@ def build_neckerchief(top, collar, params, armature) -> bpy.types.Object:
             placed, normal = surface.place(guess, 0.010 + 0.004 * (1 - fraction))
             points.append(placed)
             normals.append(normal)
-        chain = add_chain(armature, f"neckerchief_{'L' if sign > 0 else 'R'}", "chest", [points[0], points[3], points[6]])
+        chain = (add_chain(armature, f"neckerchief_{'L' if sign > 0 else 'R'}", "chest", [points[0], points[3], points[6]])
+                 if tail_chains else ["chest"])
         widths = [0.020, 0.030, 0.034, 0.036, 0.036, 0.032, 0.026]
         ribbon_vertices, ribbon_faces = _flat_ribbon(points, widths, normals, notch=0.012)
         parts.append((ribbon_vertices, ribbon_faces, NECKERCHIEF))
@@ -510,7 +533,7 @@ def build_shoes(body, params, armature) -> bpy.types.Object:
             parts.append(([vertices[index] for index in face], [tuple(range(len(face)))], material))
     vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
     vertices, faces, material_indices = mesh_utils.weld_geometry(vertices, faces, material_indices)
-    shoes = mesh_utils.mesh_from_geometry(f"{params.prefix}Shoes", vertices, faces, _uniform_materials(params), material_indices)
+    shoes = mesh_utils.mesh_from_geometry(f"{params.prefix}Shoes", vertices, faces, _shoe_materials(params), material_indices)
     mesh_utils.recalculate_normals(shoes)
     mesh_utils.add_modifier(shoes, "SUBSURF", levels=1, render_levels=1)
     mesh_utils.apply_modifiers(shoes)
@@ -530,8 +553,9 @@ def add_sleeve_bones(armature) -> list:
 def _rebalance_top_weights(top, armature, levels: UniformLevels) -> None:
     """The hem rings move with the hips like the skirt waistband (so a forward lean does not push the top into
     the skirt), and the sleeves hand part of the upper arm's weight to their spring bones."""
+    sleeves = [(side, sleeve) for side, sleeve in zip((".L", ".R"), SLEEVE_BONES) if sleeve in armature.data.bones]
     groups = {group.name: group for group in top.vertex_groups}
-    for name in ("hips",) + tuple(SLEEVE_BONES):
+    for name in ["hips"] + [sleeve for _, sleeve in sleeves]:
         if name not in groups:
             groups[name] = top.vertex_groups.new(name=name)
     names = {group.index: group.name for group in top.vertex_groups}
@@ -548,7 +572,7 @@ def _rebalance_top_weights(top, armature, levels: UniformLevels) -> None:
         if hips_share > 0.0:
             weights = {name: weight * (1.0 - hips_share) for name, weight in weights.items()}
             weights["hips"] = weights.get("hips", 0.0) + hips_share
-        for side, sleeve in zip((".L", ".R"), SLEEVE_BONES):
+        for side, sleeve in sleeves:
             arm = f"upper_arm{side}"
             if weights.get(arm, 0.0) <= 0.0:
                 continue
@@ -570,14 +594,17 @@ def _smoothstep(edge_start: float, edge_end: float, value: float) -> float:
     return fraction * fraction * (3.0 - 2.0 * fraction)
 
 
-def build_sailor_uniform(body, params, armature) -> dict:
-    """Build `<prefix>Top` (top, collar, cuffs), `<prefix>Neckerchief`, `<prefix>Skirt` and `<prefix>Shoes`."""
+def build_sailor_uniform(body, params, armature, pleat_count: int = PLEAT_COUNT, neckerchief_chains: bool = True) -> dict:
+    """Build `<prefix>Top` (top, collar, cuffs), `<prefix>Neckerchief`, `<prefix>Skirt` and `<prefix>Shoes`.
+
+    The sleeves hand weight to `sleeve_*` bones when the rig has them.
+    """
     _uniform_colors(params.uniform)
     shape = HemFit(armature, params, PLEAT_DEPTH, HEM_FLARE)
-    skirt = pleats.build_pleated_skirt(armature, params, PLEAT_COUNT, PLEAT_DEPTH, HEM_FLARE)
+    skirt = pleats.build_pleated_skirt(armature, params, pleat_count, PLEAT_DEPTH, HEM_FLARE)
     top = build_top(body, params, armature, shape)
     collar = build_collar(top, params, armature)
-    neckerchief = build_neckerchief(top, collar, params, armature)
+    neckerchief = build_neckerchief(top, collar, params, armature, neckerchief_chains)
     cuffs = build_cuffs(top, params, armature)
     mesh_utils.add_modifier(top, "SOLIDIFY", thickness=0.0025, offset=-1.0)
     mesh_utils.apply_modifiers(top)
@@ -651,8 +678,9 @@ def _basis_facing(normal) -> Matrix:
     return Matrix((across, normal.cross(across).normalized(), normal)).transposed()
 
 
-def build_collision_proxy(armature, params, radius: float = 0.22) -> bpy.types.Object:
-    """Capsule proxy at an identity transform under the armature; Godot ignores proxy object transforms."""
+def build_collision_proxy(armature, params, radius: float = 0.22, name: str | None = None) -> bpy.types.Object:
+    """Capsule proxy (default name `<prefix>-col`) at an identity transform under the armature; Godot ignores proxy
+    object transforms."""
     height = params.height
     segments = 16
     rings = []
@@ -665,7 +693,8 @@ def build_collision_proxy(armature, params, radius: float = 0.22) -> bpy.types.O
                                   ring_radius * math.sin(2 * math.pi * index / segments), z)) for index in range(segments)])
     vertices, faces = mesh_utils.loft(rings)
     vertices, faces, _ = mesh_utils.weld_geometry(vertices, faces, [0] * len(faces))
-    proxy = mesh_utils.mesh_from_geometry(f"{params.prefix}-col", vertices, faces, [principled("M_CollisionProxy", (0.5, 0.5, 0.5), 1.0)])
+    proxy = mesh_utils.mesh_from_geometry(name or f"{params.prefix}-col", vertices, faces,
+                                          [principled("M_CollisionProxy", (0.5, 0.5, 0.5), 1.0)])
     mesh_utils.recalculate_normals(proxy)
     proxy.parent = armature
     proxy.matrix_parent_inverse.identity()
@@ -674,5 +703,294 @@ def build_collision_proxy(armature, params, radius: float = 0.22) -> bpy.types.O
     return proxy
 
 
-def build_suit(*arguments, **keywords):
-    raise NotImplementedError("build_suit is implemented for the teacher in Task 10")
+# ---------------------------------------------------------------------------------------------------
+# Tailored outfits (gakuran, suit): shells cut from the skinned body, so they deform with the skin under them.
+
+JACKET_EASE = 0.016
+# The jacket hem stands this much further out than the waist, so it hangs over the trousers.
+JACKET_HEM_FLARE = 0.012
+TROUSER_EASE = 0.010
+# Straight trouser legs: from the knee down the leg is at least this round.
+TROUSER_LEG_RADIUS = 0.056
+SLEEVE_END = 0.93
+# The suit's V opening at the collar (half width) and how far above the waist it closes.
+V_OPENING_HALF_WIDTH = 0.05
+V_OPENING_BOTTOM = 0.075
+SHELL_BONES = ("hips", "spine", "chest", "neck", "head", "shoulder.L", "shoulder.R", "upper_arm.L", "upper_arm.R",
+               "forearm.L", "forearm.R", "hand.L", "hand.R", "thigh.L", "thigh.R", "shin.L", "shin.R", "foot.L", "foot.R")
+JACKET_BONES = ("hips", "spine", "chest", "shoulder.L", "shoulder.R", "upper_arm.L", "upper_arm.R", "forearm.L",
+                "forearm.R", "thigh.L", "thigh.R")
+TORSO_BONES = ("hips", "spine", "chest", "shoulder.L", "shoulder.R", "thigh.L", "thigh.R")
+LEG_BONES = ("hips", "spine", "thigh.L", "thigh.R", "shin.L", "shin.R")
+
+
+@dataclass(frozen=True)
+class TailoredLevels:
+    """Garment cut heights of a tailored outfit, derived from the rig."""
+
+    neck_z: float
+    waist_z: float
+    jacket_hem_z: float
+    trouser_hem_z: float
+    scale: float
+
+    @classmethod
+    def from_armature(cls, armature) -> "TailoredLevels":
+        levels = UniformLevels.from_armature(armature)
+        neck, _ = bone_world_points(armature, "neck")
+        hip_joint, _ = bone_world_points(armature, "thigh.L")
+        ankle, _ = bone_world_points(armature, "foot.L")
+        return cls(neck_z=neck.z, waist_z=levels.waist_z, jacket_hem_z=hip_joint.z - 0.01 * levels.scale,
+                   trouser_hem_z=ankle.z + 0.035 * levels.scale, scale=levels.scale)
+
+
+class _BoneSegments:
+    def __init__(self, armature):
+        self.segments = {name: bone_world_points(armature, name) for name in SHELL_BONES}
+
+    def nearest(self, point: Vector) -> str:
+        return min(self.segments, key=lambda name: mesh_utils.point_segment_distance(point, *self.segments[name]))
+
+    def along(self, point: Vector, name: str) -> float:
+        start, end = self.segments[name]
+        return (point - start).dot(end - start) / (end - start).length_squared
+
+
+def _tailored_materials(params, *parts: str) -> list:
+    materials = []
+    for part in parts:
+        name, color = TAILORED_UNIFORMS[params.uniform][part]
+        materials.append(principled(name, color, 0.35 if part == "trim" else 0.75))
+    return materials
+
+
+def _body_shell(body, armature, name: str, materials: list, keep, ease) -> bpy.types.Object:
+    """A garment cut from the body: the vertices `keep(point, bone)` accepts (`bone` is the nearest body bone),
+    pushed out along their normals by `ease(point, bone)` metres. It keeps the body's skin weights."""
+    bones = _BoneSegments(armature)
+    shell = body.copy()
+    shell.data = body.data.copy()
+    shell.name = name
+    shell.data.name = name
+    bpy.context.scene.collection.objects.link(shell)
+    for modifier in list(shell.modifiers):
+        shell.modifiers.remove(modifier)
+    shell.data.materials.clear()
+    for material in materials:
+        shell.data.materials.append(material)
+    mesh_utils.remove_vertices(shell, lambda point: not keep(point, bones.nearest(point)))
+    bm = bmesh.new()
+    bm.from_mesh(shell.data)
+    bm.normal_update()
+    offsets = [vertex.normal * ease(vertex.co, bones.nearest(vertex.co)) for vertex in bm.verts]
+    for vertex, offset in zip(bm.verts, offsets):
+        vertex.co += offset
+    bm.to_mesh(shell.data)
+    bm.free()
+    shell.data.polygons.foreach_set("material_index", [0] * len(shell.data.polygons))
+    shell.data.update()
+    return shell
+
+
+def _snap_open_edges(shell, wanted, plane_point, plane_normal: Vector) -> None:
+    """Flatten the jagged cut along the shell's open edges: boundary vertices `wanted(point)` accepts move onto the
+    plane through `plane_point` with `plane_normal`."""
+    bm = bmesh.new()
+    bm.from_mesh(shell.data)
+    for vertex in bm.verts:
+        if vertex.is_boundary and wanted(vertex.co):
+            vertex.co -= plane_normal * (vertex.co - plane_point).dot(plane_normal)
+    bm.to_mesh(shell.data)
+    bm.free()
+    shell.data.update()
+
+
+def _finish_shell(shell, armature) -> None:
+    mesh_utils.add_modifier(shell, "SOLIDIFY", thickness=0.0025, offset=-1.0)
+    mesh_utils.apply_modifiers(shell)
+    mesh_utils.shade_smooth(shell)
+    mesh_utils.parent_to_armature(shell, armature)
+
+
+def _build_jacket(body, params, armature, levels: TailoredLevels) -> bpy.types.Object:
+    """A closed, long-sleeved jacket down to the hips, flaring a little over the trousers."""
+    bones = _BoneSegments(armature)
+
+    def keep(point: Vector, bone: str) -> bool:
+        if bone not in JACKET_BONES or point.z < levels.jacket_hem_z:
+            return False
+        return not (bone.startswith("forearm") and bones.along(point, bone) > SLEEVE_END)
+
+    def ease(point: Vector, bone: str) -> float:
+        if bone not in TORSO_BONES:
+            return JACKET_EASE * 0.8
+        return JACKET_EASE + JACKET_HEM_FLARE * _smoothstep(levels.waist_z, levels.jacket_hem_z, point.z)
+
+    materials = _tailored_materials(params, "cloth", "trim")
+    jacket = _body_shell(body, armature, f"{params.prefix}Jacket", materials, keep, ease)
+    _snap_open_edges(jacket, lambda point: point.z < levels.jacket_hem_z + 0.05 * levels.scale,
+                     Vector((0.0, 0.0, levels.jacket_hem_z)), Vector((0.0, 0.0, 1.0)))
+    _snap_open_edges(jacket, lambda point: point.z > levels.neck_z - 0.05 * levels.scale and abs(point.x) < 0.1,
+                     Vector((0.0, 0.0, levels.neck_z - 0.01 * levels.scale)), Vector((0.0, 0.0, 1.0)))
+    for side in (".L", ".R"):
+        start, end = bones.segments[f"forearm{side}"]
+        _snap_open_edges(jacket, lambda point, side=side: bones.nearest(point) in (f"forearm{side}", f"hand{side}"),
+                         start.lerp(end, SLEEVE_END), (end - start).normalized())
+    _finish_shell(jacket, armature)
+    return jacket
+
+
+def _build_trousers(body, params, armature, levels: TailoredLevels) -> bpy.types.Object:
+    bones = _BoneSegments(armature)
+
+    def keep(point: Vector, bone: str) -> bool:
+        return bone in LEG_BONES and levels.trouser_hem_z <= point.z <= levels.waist_z
+
+    trousers = _body_shell(body, armature, f"{params.prefix}Trousers", _tailored_materials(params, "cloth"), keep,
+                           lambda point, bone: TROUSER_EASE)
+    for vertex in trousers.data.vertices:
+        bone = bones.nearest(vertex.co)
+        if not bone.startswith("shin"):
+            continue
+        start, end = bones.segments[bone]
+        axis = (end - start).normalized()
+        center = start + axis * (vertex.co - start).dot(axis)
+        radial = vertex.co - center
+        straight = TROUSER_LEG_RADIUS * levels.scale * _smoothstep(0.0, 0.35, bones.along(vertex.co, bone))
+        if 1e-6 < radial.length < straight:
+            vertex.co = center + radial.normalized() * straight
+    _snap_open_edges(trousers, lambda point: point.z < levels.trouser_hem_z + 0.05 * levels.scale,
+                     Vector((0.0, 0.0, levels.trouser_hem_z)), Vector((0.0, 0.0, 1.0)))
+    _snap_open_edges(trousers, lambda point: point.z > levels.waist_z - 0.05 * levels.scale,
+                     Vector((0.0, 0.0, levels.waist_z)), Vector((0.0, 0.0, 1.0)))
+    _finish_shell(trousers, armature)
+    return trousers
+
+
+def _stand_collar(body, armature, name: str, materials: list, height: float, ease: float,
+                  front_gap_degrees: float = 0.0) -> bpy.types.Object:
+    """A band collar standing around the base of the neck, open `front_gap_degrees` wide at the front."""
+    neck, _ = bone_world_points(armature, "neck")
+    base_z = neck.z + 0.004
+    radii = [math.hypot(vertex.co.x, vertex.co.y - neck.y) for vertex in body.data.vertices
+             if abs(vertex.co.z - base_z) < 0.012 and math.hypot(vertex.co.x, vertex.co.y - neck.y) < 0.07]
+    radius = (sum(radii) / len(radii) if radii else 0.04) + ease
+    gap = math.radians(front_gap_degrees)
+    # Angles run round the back from one side of the front gap to the other (the front is at -90 degrees).
+    angles = [-math.pi / 2 + gap / 2 + (2 * math.pi - gap) * index / 24 for index in range(25 if gap else 24)]
+    rings = []
+    for z, ring_radius in ((base_z - 0.015, radius + 0.006), (base_z, radius), (base_z + height, radius - 0.003)):
+        rings.append([Vector((math.cos(angle) * ring_radius, neck.y + math.sin(angle) * ring_radius, z))
+                      for angle in angles])
+    vertices, faces = mesh_utils.loft(rings, closed=not gap)
+    collar = mesh_utils.mesh_from_geometry(name, vertices, faces, materials, [0] * len(faces))
+    _ensure_outward(collar, Vector((0.0, neck.y, 0.0)))
+    mesh_utils.add_modifier(collar, "SOLIDIFY", thickness=0.003, offset=-1.0)
+    mesh_utils.apply_modifiers(collar)
+    mesh_utils.transfer_weights(body, collar, armature)
+    return collar
+
+
+def _buttons(surface: "_Surface", body, armature, name: str, materials: list, heights: list) -> bpy.types.Object:
+    """Small round buttons down the centre front (material slot 1)."""
+    parts = []
+    for z in heights:
+        point, normal = surface.front(0.0, z, 0.002)
+        vertices, faces = mesh_utils.ellipsoid(point, Vector((0.0065, 0.0065, 0.0028)), 10, 6, _basis_facing(normal))
+        parts.append((vertices, faces, 1))
+    vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
+    buttons = mesh_utils.mesh_from_geometry(name, vertices, faces, materials, material_indices)
+    mesh_utils.recalculate_normals(buttons)
+    mesh_utils.transfer_weights(body, buttons, armature)
+    return buttons
+
+
+def _on_surface(surface: "_Surface", body, armature, name: str, materials: list, parts: list) -> bpy.types.Object:
+    """A thin skinned mesh from (vertices, faces, material index) parts laid on a garment, facing away from the body."""
+    vertices, faces, material_indices = mesh_utils.merge_geometry(parts)
+    piece = mesh_utils.mesh_from_geometry(name, vertices, faces, materials, material_indices)
+    _orient_away_from_body(piece, armature)
+    mesh_utils.add_modifier(piece, "SOLIDIFY", thickness=0.0015, offset=-1.0)
+    mesh_utils.apply_modifiers(piece)
+    mesh_utils.transfer_weights(body, piece, armature)
+    return piece
+
+
+def _shirt_front(surface: "_Surface", levels: TailoredLevels) -> tuple:
+    """The shirt seen through the jacket's V: a panel from the collar down to where the jacket closes."""
+    bottom_z = levels.waist_z + V_OPENING_BOTTOM * levels.scale
+    top_z = levels.neck_z + 0.004
+    rows, columns = 8, 6
+    vertices = []
+    for row in range(rows + 1):
+        fraction = row / rows
+        z = bottom_z + (top_z - bottom_z) * fraction
+        half_width = max(0.002, V_OPENING_HALF_WIDTH * levels.scale * fraction)
+        for column in range(columns + 1):
+            vertices.append(surface.front(-half_width + 2 * half_width * column / columns, z, 0.0025)[0])
+    faces = [(row * (columns + 1) + column, row * (columns + 1) + column + 1, (row + 1) * (columns + 1) + column + 1,
+              (row + 1) * (columns + 1) + column) for row in range(rows) for column in range(columns)]
+    return vertices, faces, 0
+
+
+def _tie(surface: "_Surface", levels: TailoredLevels) -> list:
+    """A knot at the collar and a blade widening down the shirt front to a point, on top of the shirt panel."""
+    knot_point, knot_normal = surface.front(0.0, levels.neck_z - 0.004, 0.011)
+    knot_vertices, knot_faces = mesh_utils.ellipsoid(knot_point, Vector((0.011, 0.009, 0.006)), 10, 6,
+                                                     _basis_facing(knot_normal))
+    bottom_z = levels.waist_z + (V_OPENING_BOTTOM - 0.01) * levels.scale
+    points, normals = [], []
+    for step in range(9):
+        z = knot_point.z - 0.004 - (knot_point.z - 0.004 - bottom_z) * step / 8
+        point, normal = surface.front(0.0, z, 0.0065)
+        points.append(point)
+        normals.append(normal)
+    widths = [0.022 + 0.03 * step / 8 for step in range(9)]
+    blade_vertices, blade_faces = _flat_ribbon(points, widths, normals, notch=0.0)
+    blade_vertices.append(points[-1] + Vector((0.0, -0.001, -0.02)))
+    last = len(points) - 1
+    blade_faces.append((last * 2, last * 2 + 1, len(blade_vertices) - 1))
+    return [(knot_vertices, knot_faces, 1), (blade_vertices, blade_faces, 1)]
+
+
+def build_gakuran(body, params, armature) -> dict:
+    """Build `<prefix>Jacket` (with its stand collar and five gold buttons), `<prefix>Trousers` and `<prefix>Shoes`."""
+    levels = TailoredLevels.from_armature(armature)
+    materials = _tailored_materials(params, "cloth", "trim")
+    jacket = _build_jacket(body, params, armature, levels)
+    collar = _stand_collar(body, armature, f"{params.prefix}JacketCollar", materials, 0.032 * levels.scale, JACKET_EASE)
+    top_button = levels.neck_z - 0.05 * levels.scale
+    step = (top_button - levels.jacket_hem_z - 0.04 * levels.scale) / 4
+    buttons = _buttons(_Surface(jacket), body, armature, f"{params.prefix}Buttons", materials,
+                       [top_button - step * index for index in range(5)])
+    jacket = mesh_utils.join_objects(f"{params.prefix}Jacket", [jacket, collar, buttons])
+    return {"jacket": jacket} | _trousers_and_shoes(body, params, armature, levels)
+
+
+def build_suit(body, params, armature) -> dict:
+    """Build `<prefix>Jacket` (two buttons, a collar open at the front), `<prefix>Shirt` (the V of shirt front, its
+    collar and the tie, laid over the jacket front), `<prefix>Trousers` and `<prefix>Shoes`."""
+    levels = TailoredLevels.from_armature(armature)
+    jacket_materials = _tailored_materials(params, "cloth", "trim")
+    jacket = _build_jacket(body, params, armature, levels)
+    surface = _Surface(jacket)
+    button_z = levels.waist_z + V_OPENING_BOTTOM * levels.scale
+    buttons = _buttons(surface, body, armature, f"{params.prefix}Buttons", jacket_materials,
+                       [button_z - 0.012 * levels.scale, button_z - 0.09 * levels.scale])
+    jacket_collar = _stand_collar(body, armature, f"{params.prefix}JacketCollar", jacket_materials, 0.03 * levels.scale,
+                                  JACKET_EASE + 0.006, front_gap_degrees=80.0)
+    shirt_materials = _tailored_materials(params, "shirt", "tie")
+    shirt = _on_surface(surface, body, armature, f"{params.prefix}Shirt", shirt_materials,
+                        [_shirt_front(surface, levels)] + _tie(surface, levels))
+    shirt_collar = _stand_collar(body, armature, f"{params.prefix}ShirtCollar", shirt_materials, 0.026 * levels.scale,
+                                 JACKET_EASE)
+    jacket = mesh_utils.join_objects(f"{params.prefix}Jacket", [jacket, buttons, jacket_collar])
+    shirt = mesh_utils.join_objects(f"{params.prefix}Shirt", [shirt, shirt_collar])
+    return {"jacket": jacket, "shirt": shirt} | _trousers_and_shoes(body, params, armature, levels)
+
+
+def _trousers_and_shoes(body, params, armature, levels: TailoredLevels) -> dict:
+    trousers = _build_trousers(body, params, armature, levels)
+    shoes = build_shoes(bpy.data.objects[f"{params.prefix}Socks"], params, armature)
+    mesh_utils.shade_smooth(shoes)
+    return {"trousers": trousers, "shoes": shoes}
