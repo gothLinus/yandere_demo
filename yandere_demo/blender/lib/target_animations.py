@@ -8,6 +8,7 @@ Standing clips start from the target's idle stance and seated clips from his sea
 
 import math
 
+import bpy
 from mathutils import Quaternion, Vector
 
 from . import animation
@@ -35,6 +36,8 @@ TARGET_STANCE = Stance(
     seat_clearance=0.085,
     # Centre of the M_Mouth strip on TargetFace in the rest pose.
     mouth=Vector((0.0, -0.0738, 1.3968)),
+    # Below the chest the braid hangs free over the waist and skirt.
+    hanging_bones=("braid_06", "braid_07", "braid_08", "braid_09", "braid_10"),
 )
 
 
@@ -572,7 +575,13 @@ def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
 
 # ---------------------------------------------------------------------------------------------------
 
-def target_clips(rig: CharacterRig) -> list:
+# The braid's lower bones swing out so the plait and its bow rest on the skirt; samples cover the hair hanging at
+# skirt height and the bow.
+BRAID_RESTING_SAMPLE_BONES = ("braid_07", "braid_08", "braid_09", "braid_10", "braid_bow")
+BRAID_RESTING_LIFT_BONES = ("braid_07", "braid_08", "braid_09", "braid_10")
+
+
+def target_clips(rig: CharacterRig, braid_resting: animation.SkirtResting | None = None) -> list:
     """(name, frame count, loops, poses) for every target clip."""
     walk = WalkCycle(rig.skeleton, WALK)
     notice = {name: Curve(keys) for name, keys in NOTICE_KEYS.items()}
@@ -605,6 +614,8 @@ def target_clips(rig: CharacterRig) -> list:
     for name, frame_count, loops, body in clips:
         poses = poses_for(rig, frame_count, body)
         animation.smooth_rotations(poses, skirt_bones, loops)
+        if braid_resting is not None:
+            braid_resting.apply(poses, loops)
         composed.append((name, frame_count, loops, poses))
     return composed
 
@@ -612,8 +623,13 @@ def target_clips(rig: CharacterRig) -> list:
 def build_target_actions(armature) -> list:
     """Key every target clip onto `armature` (one muted NLA track each) and leave it in its rest pose."""
     rig = CharacterRig(armature, TARGET_STANCE)
+    prefix = armature.name.removesuffix("Char")
+    braid_resting = animation.SkirtResting(
+        armature, rig.skeleton, bpy.data.objects[f"{prefix}Skirt"],
+        [bpy.data.objects[f"{prefix}Braid"], bpy.data.objects[f"{prefix}Accessories"]],
+        BRAID_RESTING_SAMPLE_BONES, BRAID_RESTING_LIFT_BONES)
     actions = []
-    for name, frame_count, loops, poses in target_clips(rig):
+    for name, frame_count, loops, poses in target_clips(rig, braid_resting):
         actions.append(animation.build_clip(armature, rig.skeleton, name, frame_count, loops, poses))
     armature.animation_data.action = None
     for pose_bone in armature.pose.bones:

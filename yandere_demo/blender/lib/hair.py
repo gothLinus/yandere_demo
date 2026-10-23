@@ -9,7 +9,7 @@ import numpy
 import bpy
 from mathutils import Matrix, Vector
 
-from . import mesh_utils
+from . import mesh_utils, pleats
 from .face import HEAD_SCALE, head_center
 from .materials import hex_to_srgb, principled
 from .rig import BRAID_BONES, BRAID_BOW_BONE, add_bone, add_chain
@@ -408,6 +408,29 @@ def add_braid_chain(armature, params) -> list:
     return names
 
 
+# Distance the braid's centre line keeps from the skirt's outer pleat faces: the plait's half-thickness plus a little
+# air, so the plait and its bow rest on the skirt instead of sinking into it.
+BRAID_SKIRT_CLEARANCE = 0.024
+# Width of the soft blend between hanging free and resting on the skirt, so the plait has no kink where it meets it.
+BRAID_SKIRT_BLEND = 0.012
+
+
+def _rest_on_skirt(points: list, skirt: pleats.SkirtSurface) -> list:
+    """Push every point at skirt height radially out to the skirt's outer surface plus the plait's clearance."""
+    rested = []
+    for point in points:
+        if not skirt.covers(point.z):
+            rested.append(point)
+            continue
+        radial = Vector((point.x, point.y - pleats.CENTER_Y, 0.0))
+        radius = radial.length
+        angle = math.atan2(radial.y, radial.x)
+        minimum = skirt.radius(angle, point.z) + BRAID_SKIRT_CLEARANCE
+        smooth = 0.5 * (radius + minimum + math.sqrt((radius - minimum) ** 2 + BRAID_SKIRT_BLEND ** 2))
+        rested.append(point + radial.normalized() * (smooth - radius))
+    return rested
+
+
 def _braid_curve(armature, params, samples: int) -> list:
     points = braid_points(armature, params)
     dense = []
@@ -420,7 +443,7 @@ def _braid_curve(armature, params, samples: int) -> list:
             fraction = step / 8
             dense.append(_catmull_rom(before, start, end, after, fraction))
     dense.append(points[-1])
-    return _resample(dense, samples)
+    return _resample(_rest_on_skirt(dense, pleats.SkirtSurface(armature, params)), samples)
 
 
 def _catmull_rom(before, start, end, after, fraction):

@@ -11,6 +11,8 @@ from .materials import principled
 from .rig import SKIRT_CHAIN_COUNT, SKIRT_CHAINS, SKIRT_SEGMENTS, add_chain, chain_names, skirt_chain_azimuth
 
 PLEAT_COUNT_RANGE = (16, 24)
+PLEAT_DEPTH = 0.012
+HEM_FLARE = 0.18
 SECTORS = 72
 CENTER_Y = 0.004
 # Ease between the body and the inside of the pleat recesses, and the flat stitched waistband.
@@ -86,6 +88,23 @@ class DrapeProfile:
         return (body + CLEARANCE * self.levels.scale) * flare
 
 
+class SkirtSurface:
+    """The skirt's outer surface (drape profile plus the open pleat depth), known before the skirt is built."""
+
+    def __init__(self, armature, params, pleat_depth: float = PLEAT_DEPTH, hem_flare: float = HEM_FLARE):
+        self.levels = SkirtLevels(armature)
+        self.profile = DrapeProfile(_body(armature, params), self.levels, hem_flare)
+        self.pleat_depth = pleat_depth
+
+    def radius(self, angle: float, z: float) -> float:
+        """Distance of the outer pleat faces from the skirt axis at an azimuth (atan2(y - CENTER_Y, x)) and height."""
+        fraction = self.levels.fraction(z)
+        return self.profile.radius(angle, fraction) + self.pleat_depth * self.levels.scale * _pleat_opening(max(0.0, fraction))
+
+    def covers(self, z: float) -> bool:
+        return 0.0 <= self.levels.fraction(z) <= 1.0
+
+
 def _lower_body_tree(body) -> BVHTree:
     """BVH of the body faces skinned mainly to the torso and legs, so the hanging arms never widen the skirt."""
     names = {group.index: group.name for group in body.vertex_groups}
@@ -129,7 +148,7 @@ def _body(armature, params):
     return body
 
 
-def add_skirt_bones(armature, params, hem_flare: float = 0.18) -> list:
+def add_skirt_bones(armature, params, hem_flare: float = HEM_FLARE) -> list:
     """Eight three-bone chains laid on the skirt's surface at each pleat group's centre, from waist to hem."""
     levels = SkirtLevels(armature)
     profile = DrapeProfile(_body(armature, params), levels, hem_flare)
@@ -145,8 +164,8 @@ def add_skirt_bones(armature, params, hem_flare: float = 0.18) -> list:
     return names
 
 
-def build_pleated_skirt(armature, params, pleat_count: int = 20, pleat_depth: float = 0.012,
-                        hem_flare: float = 0.18) -> bpy.types.Object:
+def build_pleated_skirt(armature, params, pleat_count: int = 20, pleat_depth: float = PLEAT_DEPTH,
+                        hem_flare: float = HEM_FLARE) -> bpy.types.Object:
     """Even box pleats with a white hem trim, skinned to the hips and the eight `skirt_NN` chains."""
     if not PLEAT_COUNT_RANGE[0] <= pleat_count <= PLEAT_COUNT_RANGE[1]:
         raise ValueError(f"pleat_count must be within {PLEAT_COUNT_RANGE[0]}..{PLEAT_COUNT_RANGE[1]}, got {pleat_count}")
@@ -164,7 +183,7 @@ def build_pleated_skirt(armature, params, pleat_count: int = 20, pleat_depth: fl
     samples = len(PLEAT_SAMPLES)
     columns = pleat_count * samples
     pleat_angle = 2 * math.pi / pleat_count
-    # Pleat 0 is centred on the front so the chains and the folds line up symmetrically.
+    # The last pleat is centred on the front (-pi/2), so the chains and the folds line up symmetrically.
     start_angle = -math.pi / 2 - pleat_angle / 2
     rings = []
     for fraction in fractions:

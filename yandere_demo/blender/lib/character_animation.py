@@ -15,7 +15,7 @@ from mathutils import Quaternion, Vector
 
 from .animation import (
     FORWARD, SIDES, UP, Curve, FootGeometry, Pose, Skeleton, WalkCycle, aligning_rotation, bend,
-    curl_fingers, degrees, follow_skirt, forward_kinematics, idle_breathing, lerp, mirrored_degrees, palm_normal,
+    curl_fingers, degrees, follow_skirt, forward_kinematics, hang, idle_breathing, lerp, mirrored_degrees, palm_normal,
     place_leg, reach_arm, set_world_rotation, share_twist, side_sign, sit_pose, smoothstep, world_point,
 )
 
@@ -55,6 +55,8 @@ class Stance:
     idle_feet: dict
     # Rest-pose armature-space mouth position, measured on the face mesh (it differs per head and height).
     mouth: Vector
+    # Free-hanging chain bones (the lower braid) that keep hanging straight down however the torso and head turn.
+    hanging_bones: tuple = ()
     idle_hips_offset: Vector = field(default_factory=Vector)
     idle_hips: tuple = (0.0, 0.0, 0.0)
     idle_spine: tuple = (0.0, 0.0, 0.0)
@@ -244,6 +246,7 @@ def compose(rig: CharacterRig, spec: BodySpec) -> Pose:
     # Secondary bones first, so hand targets carried by them (the braid) see their final pose.
     for bone, rotation in spec.extra_rotations.items():
         pose.rotations[bone] = degrees(*rotation)
+    hang(skeleton, pose, tuple(bone for bone in rig.stance.hanging_bones if bone not in spec.extra_rotations))
     for side in SIDES:
         arm = spec.arms[side]
         pose.turn(f"shoulder{side}", mirrored_degrees(side, *arm.shoulder))

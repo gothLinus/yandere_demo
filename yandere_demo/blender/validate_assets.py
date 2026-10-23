@@ -28,6 +28,11 @@ TARGET_MESHES = ["Body", "Face", "Eyes", "Lashes", "Hair", "Braid", "Top", "Neck
 TARGET_PLEAT_COUNT = 20
 # Standing clips whose every frame must keep the thighs inside the skirt (full walk stride included).
 SKIRT_CLEAR_ACTIONS = ["target_walk_routine", "target_idle", "target_idle_shy", "target_idle_playful", "target_idle_confident"]
+# Standing clips whose braid and bow must rest on the skirt in every frame. Seated clips are left out: the bow lies
+# on the lap there, where "further out from the hips' axis" no longer means "on top of the fabric".
+BRAID_CLEAR_ACTIONS = ["target_idle", "target_walk_routine", "target_notice_player", "target_startled",
+                       "target_look_around", "target_drink", "target_fix_braid", "target_lean_chat", "target_sweep",
+                       "target_wave", "target_idle_shy", "target_idle_playful", "target_idle_confident"]
 # Action name -> (frame count at 30 fps, loops).
 TARGET_ACTIONS = {
     "target_idle": (90, True),
@@ -60,6 +65,7 @@ CHECKS = {
         "meshes": TARGET_MESHES,
         "pleat_count": TARGET_PLEAT_COUNT,
         "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
+        "braid_clear_actions": BRAID_CLEAR_ACTIONS,
     },
 }
 
@@ -79,7 +85,7 @@ def run_check(check_name: str) -> list[str]:
     bpy.ops.wm.open_mainfile(filepath=blend_path)
     errors = validate_character(check["prefix"], check["shape_keys"], check["actions"], check["bones"], check["meshes"])
     return errors + validate_target_extras(check["prefix"], check["shape_keys"], check["pleat_count"],
-                                           check["skirt_clear_actions"])
+                                           check["skirt_clear_actions"], check["braid_clear_actions"])
 
 
 def main() -> int:

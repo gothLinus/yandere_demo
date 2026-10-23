@@ -21,8 +21,8 @@ UNIFORM_COLORS = {
 REFERENCE_HEIGHT = 1.58
 SLEEVE_FRACTION = 0.52
 PLEAT_COUNT = 20
-PLEAT_DEPTH = 0.012
-HEM_FLARE = 0.18
+PLEAT_DEPTH = pleats.PLEAT_DEPTH
+HEM_FLARE = pleats.HEM_FLARE
 # The femboy top sits slightly loose on the narrow frame.
 TOP_EASE = 0.011
 SLEEVE_PUFF = 0.012
@@ -92,14 +92,10 @@ class HemFit:
 
     def __init__(self, armature, params, pleat_depth: float, hem_flare: float):
         self.levels = UniformLevels.from_armature(armature)
-        self.skirt_levels = pleats.SkirtLevels(armature)
-        body = bpy.data.objects[f"{params.prefix}Body"]
-        self.profile = pleats.DrapeProfile(body, self.skirt_levels, hem_flare)
-        self.pleat_depth = pleat_depth
+        self.skirt = pleats.SkirtSurface(armature, params, pleat_depth, hem_flare)
 
     def radius(self, angle: float, z: float) -> float:
-        fraction = self.skirt_levels.fraction(z)
-        return self.profile.radius(angle, fraction) + self.pleat_depth * self.levels.scale * pleats._pleat_opening(max(0.0, fraction))
+        return self.skirt.radius(angle, z)
 
 
 def _ensure_outward(mesh_object, axis_point: Vector) -> None:

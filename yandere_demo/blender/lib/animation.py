@@ -13,8 +13,10 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import bpy
+import numpy
 from bpy_extras import anim_utils
 from mathutils import Euler, Matrix, Quaternion, Vector
+from mathutils.bvhtree import BVHTree
 
 FPS = 30
 SIDES = (".L", ".R")
@@ -724,6 +726,223 @@ def smooth_rotations(poses: list, bones: list, loop: bool, passes: int = SKIRT_S
     if loop:
         for bone in bones:
             poses[-1].rotations[bone] = poses[0].rotation(bone).copy()
+
+
+# ---------------------------------------------------------------------------------------------------
+# Keeping hanging accessories (the braid and its bow) on top of the skirt
+
+# Air kept between the plait or bow and the skirt's outer pleat faces.
+SKIRT_RESTING_MARGIN = 0.007
+MAX_LIFT_DEGREES = 80.0
+LIFT_SCAN_DEGREES = 2.5
+# How far out a ray from a sample looks for fabric that still covers it.
+SKIRT_RESTING_DEPTH = 0.12
+LIFT_SAMPLE_COUNT = 160
+# Only the skirt within this azimuth of the hanging chain can reach it.
+SKIRT_REGION_DEGREES = 80.0
+# The per-frame lift is widened by this many frames on each side, then blurred with the same passes as the skirt,
+# so the blurred lift never drops below what any frame needs.
+LIFT_WIDENING_FRAMES = SKIRT_SMOOTHING_PASSES
+
+
+def _dominant_group(mesh_object, vertex) -> str | None:
+    dominant = max(vertex.groups, key=lambda element: element.weight, default=None)
+    return mesh_object.vertex_groups[dominant.group].name if dominant is not None else None
+
+
+def _farthest_points(points: numpy.ndarray, count: int, first: int) -> list:
+    chosen = [first]
+    distances = numpy.linalg.norm(points - points[first], axis=1)
+    while len(chosen) < min(count, len(points)):
+        index = int(numpy.argmax(distances))
+        chosen.append(index)
+        distances = numpy.minimum(distances, numpy.linalg.norm(points - points[index], axis=1))
+    return chosen
+
+
+def hang(skeleton: Skeleton, pose: Pose, bones: tuple) -> None:
+    """Let a free-hanging chain keep its rest direction in the world (gravity) however the body above it turns."""
+    for bone in bones:
+        set_world_rotation(skeleton, pose, bone, Quaternion())
+
+
+class SkirtResting:
+    """Bakes a hanging chain (the braid and its bow) so it rests on the posed skirt instead of sinking into it.
+
+    The skirt is the real skinned mesh near the chain, posed by linear blend skinning from the composed bone
+    poses; the chain is sampled from its own meshes. Where a sample would sink into the skirt, the lift bones
+    swing the lower chain out along the skirt's outward normal by the smallest angle that clears it.
+    """
+
+    def __init__(self, armature, skeleton: Skeleton, skirt, chain_meshes: list, sample_bones: tuple, lift_bones: tuple):
+        self.skeleton = skeleton
+        self.lift_bones = lift_bones
+        to_armature = armature.matrix_world.inverted()
+        samples, sample_bones_of = [], []
+        for mesh_object in chain_meshes:
+            matrix = to_armature @ mesh_object.matrix_world
+            for vertex in mesh_object.data.vertices:
+                bone = _dominant_group(mesh_object, vertex)
+                if bone in sample_bones:
+                    samples.append(tuple(matrix @ vertex.co))
+                    sample_bones_of.append(bone)
+        points = numpy.array(samples)
+        lowest = int(numpy.argmin(points[:, 2]))
+        chosen = _farthest_points(points, LIFT_SAMPLE_COUNT, lowest)
+        self.sample_groups = {}
+        for index in chosen:
+            self.sample_groups.setdefault(sample_bones_of[index], []).append(points[index])
+        self.sample_groups = {bone: numpy.array(group) for bone, group in sorted(self.sample_groups.items())}
+        self._prepare_skirt(to_armature @ skirt.matrix_world, skirt, points.mean(axis=0))
+
+    def _prepare_skirt(self, matrix: Matrix, skirt, chain_center: numpy.ndarray) -> None:
+        center = self.skeleton.heads["hips"]
+        chain_azimuth = math.atan2(chain_center[1] - center.y, chain_center[0] - center.x)
+        rest = [matrix @ vertex.co for vertex in skirt.data.vertices]
+
+        def in_region(point: Vector) -> bool:
+            azimuth = math.atan2(point.y - center.y, point.x - center.x)
+            offset = (azimuth - chain_azimuth + math.pi) % (2.0 * math.pi) - math.pi
+            return abs(math.degrees(offset)) <= SKIRT_REGION_DEGREES
+
+        normal_matrix = matrix.to_3x3().inverted().transposed()
+        faces = []
+        for polygon in skirt.data.polygons:
+            radial = Vector((polygon.center.x - center.x, polygon.center.y - center.y, 0.0))
+            # Only the outer shell: the solidified inner shell faces the body.
+            if (normal_matrix @ polygon.normal).dot(radial) <= 0.0:
+                continue
+            if all(in_region(rest[index]) for index in polygon.vertices):
+                faces.append(tuple(polygon.vertices))
+        used = sorted({index for face in faces for index in face})
+        remap = {index: position for position, index in enumerate(used)}
+        self.skirt_faces = [tuple(remap[index] for index in face) for face in faces]
+        self.skirt_rest = numpy.array([tuple(rest[index]) for index in used])
+        bones = sorted({skirt.vertex_groups[element.group].name for index in used
+                        for element in skirt.data.vertices[index].groups if element.weight > 0.0})
+        self.skirt_bones = [bone for bone in bones if bone in self.skeleton.heads]
+        weights = numpy.zeros((len(used), len(self.skirt_bones)))
+        columns = {bone: column for column, bone in enumerate(self.skirt_bones)}
+        for row, index in enumerate(used):
+            for element in skirt.data.vertices[index].groups:
+                name = skirt.vertex_groups[element.group].name
+                if name in columns:
+                    weights[row, columns[name]] = element.weight
+        self.skirt_weights = weights / numpy.maximum(weights.sum(axis=1, keepdims=True), 1e-9)
+
+    def _skirt_tree(self, world: dict, heads: dict) -> BVHTree:
+        posed = numpy.zeros_like(self.skirt_rest)
+        for column, bone in enumerate(self.skirt_bones):
+            rotation = numpy.array(world[bone].to_matrix())
+            moved = (self.skirt_rest - numpy.array(self.skeleton.heads[bone])) @ rotation.T + numpy.array(heads[bone])
+            posed += self.skirt_weights[:, column:column + 1] * moved
+        return BVHTree.FromPolygons([Vector(point) for point in posed], self.skirt_faces)
+
+    def _samples(self, world: dict, heads: dict) -> list:
+        positions = []
+        for bone, points in self.sample_groups.items():
+            rotation = numpy.array(world[bone].to_matrix())
+            moved = (points - numpy.array(self.skeleton.heads[bone])) @ rotation.T + numpy.array(heads[bone])
+            positions += [Vector(point) for point in moved]
+        return positions
+
+    def _clearances(self, tree: BVHTree, pose: Pose) -> list:
+        """(signed distance outside the skirt, outward normal) of every sample.
+
+        A sample is inside when the skirt still lies further out along the ray pointing away from the hips' axis;
+        its depth is how far that ray travels to the fabric.
+        """
+        world, heads = forward_kinematics(self.skeleton, pose)
+        up = world["hips"] @ UP
+        center = heads["hips"]
+        result = []
+        for point in self._samples(world, heads):
+            radial = point - center
+            radial -= up * radial.dot(up)
+            if radial.length > 1e-6:
+                location, normal, _, distance = tree.ray_cast(point, radial.normalized(), SKIRT_RESTING_DEPTH)
+                if location is not None:
+                    result.append((-distance, normal if normal.dot(radial) > 0.0 else -normal))
+                    continue
+            location, normal, _, distance = tree.find_nearest(point)
+            if location is not None:
+                result.append((distance, normal if normal.dot(radial) > 0.0 else -normal))
+        return result
+
+    def _lifted(self, pose: Pose, axis: Vector, angle: float) -> Pose:
+        lifted = pose.copy()
+        step = math.radians(angle) / len(self.lift_bones)
+        for bone in self.lift_bones:
+            world, _ = forward_kinematics(self.skeleton, lifted)
+            set_world_rotation(self.skeleton, lifted, bone, Quaternion(axis, step) @ world[bone])
+        return lifted
+
+    def _required_lift(self, pose: Pose) -> tuple[float, Vector | None]:
+        world, heads = forward_kinematics(self.skeleton, pose)
+        tree = self._skirt_tree(world, heads)
+        clearances = self._clearances(tree, pose)
+        if not clearances:
+            return 0.0, None
+        pivot = heads[self.lift_bones[0]]
+        samples = self._samples(world, heads)
+        hanging = sum(samples, Vector()) / len(samples) - pivot
+        # Swing away from the hips' axis: out over a standing skirt, forward along the lap when seated.
+        up = world["hips"] @ UP
+        outward = hanging + pivot - heads["hips"]
+        outward -= up * outward.dot(up)
+        axis = hanging.cross(outward)
+        if axis.length < 1e-6:
+            return 0.0, None
+        axis.normalize()
+
+        def worst(angle: float) -> float:
+            return min(distance for distance, _ in self._clearances(tree, self._lifted(pose, axis, angle)))
+
+        if worst(0.0) >= SKIRT_RESTING_MARGIN:
+            return 0.0, axis
+        # Scan up first (a swing can clear one part of the skirt and meet another), then refine the first clear step.
+        low = 0.0
+        for step in range(1, int(MAX_LIFT_DEGREES / LIFT_SCAN_DEGREES) + 1):
+            high = step * LIFT_SCAN_DEGREES
+            if worst(high) >= SKIRT_RESTING_MARGIN:
+                break
+            low = high
+        else:
+            return MAX_LIFT_DEGREES, axis
+        for _ in range(8):
+            middle = 0.5 * (low + high)
+            if worst(middle) >= SKIRT_RESTING_MARGIN:
+                high = middle
+            else:
+                low = middle
+        return high, axis
+
+    def apply(self, poses: list, loop: bool) -> float:
+        """Lift the chain in every pose (after the skirt keys are final); returns the largest lift in degrees."""
+        count = len(poses) - 1 if loop else len(poses)
+        needs = [self._required_lift(poses[frame]) for frame in range(count)]
+        lifts = [angle for angle, _ in needs]
+        if max(lifts) <= 0.0:
+            return 0.0
+
+        def neighbour(frame: int, offset: int) -> int:
+            return (frame + offset) % count if loop else max(0, min(count - 1, frame + offset))
+
+        widened = [max(lifts[neighbour(frame, offset)] for offset in range(-LIFT_WIDENING_FRAMES, LIFT_WIDENING_FRAMES + 1))
+                   for frame in range(count)]
+        for _ in range(SKIRT_SMOOTHING_PASSES):
+            widened = [(widened[neighbour(frame, -1)] + 2.0 * widened[frame] + widened[neighbour(frame, 1)]) / 4.0
+                       for frame in range(count)]
+        for frame in range(count):
+            angle, axis = widened[frame], needs[frame][1]
+            if angle > 0.0 and axis is not None:
+                lifted = self._lifted(poses[frame], axis, angle)
+                for bone in self.lift_bones:
+                    poses[frame].rotations[bone] = lifted.rotation(bone)
+        if loop:
+            for bone in self.lift_bones:
+                poses[-1].rotations[bone] = poses[0].rotation(bone).copy()
+        return max(widened)
 
 
 # ---------------------------------------------------------------------------------------------------

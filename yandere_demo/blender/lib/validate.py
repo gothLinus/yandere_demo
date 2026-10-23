@@ -1,6 +1,7 @@
 """Structural checks for generated character assets, run inside Blender."""
 
 import bpy
+from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 PROXY_MATERIAL_NAME = "M_CollisionProxy"
@@ -149,10 +150,20 @@ ZERO_AREA = 1e-10
 
 
 def validate_target_extras(prefix: str, shape_keys: list[str], pleat_count: int,
-                           skirt_clear_actions: list[str] | None = None) -> list[str]:
+                           skirt_clear_actions: list[str] | None = None,
+                           braid_clear_actions: list[str] | None = None) -> list[str]:
     """Checks for the 4.1b target: shape keys on the split face meshes, the hidden blush, the pleat count,
-    skinned fingers, the femboy silhouette, and no leg poking through the skirt in `skirt_clear_actions`."""
+    skinned fingers, the femboy silhouette, no leg poking through the skirt in `skirt_clear_actions`, and no
+    braid or bow sinking into the skirt in `braid_clear_actions`."""
     errors: list[str] = []
+    for action_name in braid_clear_actions or []:
+        if bpy.data.actions.get(action_name) is None:
+            continue
+        sunk = [(frame, count, depth) for frame, count, depth in braid_skirt_penetrations(prefix, action_name) if count]
+        if sunk:
+            frame, count, depth = max(sunk, key=lambda item: item[2])
+            errors.append(f"{action_name}: the braid or its bow sinks into the skirt in {len(sunk)} frames "
+                          f"(worst frame {frame}: {count} vertices, {depth * 1000:.1f} mm)")
     for action_name in skirt_clear_actions or []:
         if bpy.data.actions.get(action_name) is None:
             continue
@@ -227,7 +238,7 @@ def _validate_silhouette(prefix: str, body) -> list[str]:
         head_group = face.vertex_groups["head"].index
         heights = [(face.matrix_world @ vertex.co).z for vertex in face.data.vertices
                    if any(element.group == head_group for element in vertex.groups)]
-        _, crown = armature.matrix_world @ armature.data.bones["head"].head_local, max(heights)
+        crown = max(heights)
         ratio = (armature.matrix_world @ armature.data.bones["head"].tail_local).z / (crown - min(heights))
         if not HEAD_RATIO_RANGE[0] <= ratio <= HEAD_RATIO_RANGE[1]:
             errors.append(f"head-to-height ratio is 1:{ratio:.2f}, expected 1:{HEAD_RATIO_RANGE[0]}-{HEAD_RATIO_RANGE[1]}")
@@ -304,6 +315,68 @@ def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, fl
                 count += 1
                 deepest = max(deepest, distance)
             evaluated_leg.to_mesh_clear()
+        results.append((frame, count, deepest))
+    animation_data.action = previous_action
+    return results
+
+
+# Braid bones whose hair hangs at skirt height, plus the bow on its tip.
+BRAID_SKIRT_BONES = ("braid_07", "braid_08", "braid_09", "braid_10", "braid_bow")
+BRAID_SKIRT_TOLERANCE = 0.001
+BRAID_SKIRT_RANGE = 0.08
+
+
+def braid_skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, float]]:
+    """(frame, braid and bow vertices hidden inside the skirt, deepest in metres) for every frame of a standing action.
+
+    A vertex is inside when a ray from it, pointing away from the hips' vertical axis, still meets the skirt: the
+    fabric then lies further out than the bow or braid at that height.
+    """
+    armature = bpy.data.objects[f"{prefix}Char"]
+    skirt = bpy.data.objects[f"{prefix}Skirt"]
+    sources = [bpy.data.objects[f"{prefix}{part}"] for part in ("Braid", "Accessories")]
+    action = bpy.data.actions[action_name]
+    vertex_lists = {}
+    for source in sources:
+        names = {group.index: group.name for group in source.vertex_groups}
+        vertex_lists[source.name] = [vertex.index for vertex in source.data.vertices
+                                     if (dominant := max(vertex.groups, key=lambda element: element.weight, default=None))
+                                     and names[dominant.group] in BRAID_SKIRT_BONES]
+    animation_data = armature.animation_data_create()
+    previous_action = animation_data.action
+    animation_data.action = action
+    if hasattr(animation_data, "action_slot") and action.slots:
+        animation_data.action_slot = action.slots[0]
+    scene = bpy.context.scene
+    results = []
+    for frame in range(int(action.frame_range[0]), int(action.frame_range[1]) + 1):
+        scene.frame_set(frame)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated_skirt = skirt.evaluated_get(depsgraph)
+        mesh = evaluated_skirt.to_mesh()
+        vertices = [skirt.matrix_world @ vertex.co for vertex in mesh.vertices]
+        tree = BVHTree.FromPolygons(vertices, [tuple(polygon.vertices) for polygon in mesh.polygons])
+        evaluated_skirt.to_mesh_clear()
+        hips = armature.matrix_world @ armature.pose.bones["hips"].matrix
+        axis_origin = hips.translation
+        up = (hips.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()
+        count = 0
+        deepest = 0.0
+        for source in sources:
+            evaluated = source.evaluated_get(depsgraph)
+            source_mesh = evaluated.to_mesh()
+            for index in vertex_lists[source.name]:
+                point = source.matrix_world @ source_mesh.vertices[index].co
+                radial = point - axis_origin
+                radial -= up * radial.dot(up)
+                if radial.length < 1e-6:
+                    continue
+                location, _, _, distance = tree.ray_cast(point, radial.normalized(), BRAID_SKIRT_RANGE)
+                if location is None or distance < BRAID_SKIRT_TOLERANCE:
+                    continue
+                count += 1
+                deepest = max(deepest, distance)
+            evaluated.to_mesh_clear()
         results.append((frame, count, deepest))
     animation_data.action = previous_action
     return results

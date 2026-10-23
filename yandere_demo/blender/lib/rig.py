@@ -104,23 +104,6 @@ def skirt_chain_azimuth(chain_index: int) -> float:
     return -math.pi / 2 - chain_index * 2 * math.pi / SKIRT_CHAIN_COUNT
 
 
-def add_skirt_chains(armature, waist_z: float, hem_z: float, waist_radius: tuple, hem_radius: tuple,
-                     center_y: float = 0.004) -> list[str]:
-    """Eight chains of three bones from the waistband to the hem, each on its pleat group's centre line."""
-    names: list[str] = []
-    for chain_index, prefix in enumerate(SKIRT_CHAINS):
-        angle = skirt_chain_azimuth(chain_index)
-        points = []
-        for segment in range(SKIRT_SEGMENTS + 1):
-            fraction = segment / SKIRT_SEGMENTS
-            radius_x = waist_radius[0] + (hem_radius[0] - waist_radius[0]) * fraction ** 0.85
-            radius_y = waist_radius[1] + (hem_radius[1] - waist_radius[1]) * fraction ** 0.85
-            z = waist_z + (hem_z - waist_z) * fraction
-            points.append(Vector((math.cos(angle) * radius_x, math.sin(angle) * radius_y + center_y, z)))
-        names += add_chain(armature, prefix, "hips", points)
-    return names
-
-
 def _humanoid_layout(height: float, landmarks: dict) -> list[tuple]:
     def scaled(key: str) -> float:
         return landmarks[key] * height
