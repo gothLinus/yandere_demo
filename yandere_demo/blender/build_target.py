@@ -21,7 +21,7 @@ from lib import (  # noqa: E402
 )
 
 # A live Blender session keeps modules cached between runs; reload so edits take effect.
-for module in (materials, mesh_utils, rig, body, face, hair, pleats, clothing, export, animation, character_animation,
+for module in (materials, mesh_utils, rig, body, face, pleats, hair, clothing, export, animation, character_animation,
                target_animations):
     importlib.reload(module)
 
