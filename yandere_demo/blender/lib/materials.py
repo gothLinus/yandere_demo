@@ -21,16 +21,16 @@ def srgb_to_linear(channel: float) -> float:
 
 
 def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: str | None = None,
-               alpha: float = 1.0, texture_alpha: bool = True) -> bpy.types.Material:
+               alpha: float = 1.0, texture_alpha: bool = True, emission_strength: float = 0.0) -> bpy.types.Material:
     """Return the material `name`, creating it once. `color` is sRGB (r, g, b) or a hex string.
 
     Asking for an existing name with a different color, roughness or texture raises instead of silently
-    returning the first definition.
+    returning the first definition. A positive `emission_strength` makes the surface glow in its own color.
     """
     if isinstance(color, str):
         color = hex_to_srgb(color)
     linear = tuple(srgb_to_linear(channel) for channel in color[:3]) + (1.0,)
-    definition = _definition(linear, roughness, texture_path, alpha)
+    definition = _definition(linear, roughness, texture_path, alpha, emission_strength)
     existing = bpy.data.materials.get(name)
     if existing is not None:
         if existing.get(DEFINITION_PROPERTY) != definition:
@@ -45,6 +45,9 @@ def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: st
     shader.inputs["Roughness"].default_value = roughness
     material.diffuse_color = linear
     material.roughness = roughness
+    if emission_strength > 0.0:
+        shader.inputs["Emission Color"].default_value = linear
+        shader.inputs["Emission Strength"].default_value = emission_strength
     if texture_path:
         _attach_texture(material, shader, texture_path, texture_alpha)
     if alpha < 1.0:
@@ -54,10 +57,13 @@ def principled(name: str, color: tuple, roughness: float = 0.6, texture_path: st
     return material
 
 
-def _definition(linear: tuple, roughness: float, texture_path: str | None, alpha: float) -> str:
+def _definition(linear: tuple, roughness: float, texture_path: str | None, alpha: float,
+                emission_strength: float) -> str:
     rounded = ", ".join(f"{channel:.4f}" for channel in linear[:3])
     texture = os.path.abspath(texture_path) if texture_path else ""
     suffix = f" alpha={alpha:.3f}" if alpha < 1.0 else ""
+    if emission_strength > 0.0:
+        suffix += f" emission={emission_strength:.3f}"
     return f"color=({rounded}) roughness={roughness:.3f} texture={texture}{suffix}"
 
 
