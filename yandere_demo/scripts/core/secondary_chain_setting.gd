@@ -7,10 +7,17 @@ extends Resource
 @export var stiffness: float = 1.0
 @export var drag: float = 0.4
 @export var gravity: float = 0.0
+## Joint radius used against the colliders.
 @export var radius: float = 0.02
-## Root bone of each chain in this family, parallel to `end_bones`.
+## Root bone of each chain in this family, parallel to `end_bones` and `end_bone_lengths`.
 @export var root_bones: PackedStringArray = PackedStringArray()
-## Leaf bone of each chain; the simulator extends it by `end_bone_length` along the bone axis.
+## Leaf bone of each chain (single-bone chains use the same bone as root and end).
 @export var end_bones: PackedStringArray = PackedStringArray()
-## Rest length of the leaf bones (glTF drops bone tails, so the simulator needs it explicitly).
-@export var end_bone_length: float = 0.05
+## Rest length of each leaf bone. glTF drops bone tails, so the simulator needs it to place the chain's tip.
+@export var end_bone_lengths: PackedFloat32Array = PackedFloat32Array()
+## Simulate a tip joint past the leaf bone (`set_extend_end_bone`), `end_bone_lengths` along `end_bone_direction`.
+@export var extend_end_bone: bool = true
+## Imported bones point along their +Y axis.
+@export var end_bone_direction: SkeletonModifier3D.BoneDirection = SkeletonModifier3D.BONE_DIRECTION_PLUS_Y
+## Bones of the `SecondaryMotionTuning.colliders` this family collides with; every joint clears them at rest.
+@export var colliders: Array[StringName] = []

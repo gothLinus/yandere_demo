@@ -6,6 +6,9 @@ const REQUIRED_BLEND_SHAPES: Array[String] = [
 	"neutral", "startled", "suspicious", "happy", "blink",
 	"smile", "sad", "blush", "wink_L", "wink_R", "mouth_A", "mouth_I", "mouth_U", "mouth_E", "mouth_O",
 ]
+# Pupil size and highlight controls, on the face and on the eyes (the pupil discs live on TargetEyes).
+const PUPIL_BLEND_SHAPES: Array[String] = ["pupil_small", "pupil_large"]
+const PUPIL_MESHES: Array[String] = ["TargetFace", "TargetEyes"]
 const REQUIRED_MESHES: Array[String] = [
 	"TargetBody", "TargetFace", "TargetEyes", "TargetLashes", "TargetHair", "TargetBraid", "TargetTop",
 	"TargetNeckerchief", "TargetSkirt", "TargetSocks", "TargetShoes", "TargetAccessories", "TargetBlush",
@@ -66,11 +69,16 @@ func test_target_glb_structure() -> void:
 
 	var face: MeshInstance3D = root.find_child("TargetFace", true, false) as MeshInstance3D
 	if face != null:
-		var blend_shape_names: Array[String] = []
-		for blend_shape_index: int in face.mesh.get_blend_shape_count():
-			blend_shape_names.append(String(face.mesh.get_blend_shape_name(blend_shape_index)))
+		var blend_shape_names: Array[String] = _blend_shape_names(face)
 		for blend_shape_name: String in REQUIRED_BLEND_SHAPES:
 			assert_true(blend_shape_names.has(blend_shape_name), "blend shape %s exists" % blend_shape_name)
+	for mesh_name: String in PUPIL_MESHES:
+		var pupil_mesh: MeshInstance3D = root.find_child(mesh_name, true, false) as MeshInstance3D
+		assert_true(pupil_mesh != null, "%s exists for the pupil controls" % mesh_name)
+		if pupil_mesh == null:
+			continue
+		for blend_shape_name: String in PUPIL_BLEND_SHAPES:
+			assert_true(_blend_shape_names(pupil_mesh).has(blend_shape_name), "%s has %s" % [mesh_name, blend_shape_name])
 
 	assert_true(root.has_meta("body_shape"), "root has body_shape meta")
 	if root.has_meta("body_shape"):
@@ -93,6 +101,13 @@ func test_target_glb_structure() -> void:
 
 	_assert_animations(root)
 	root.free()
+
+
+func _blend_shape_names(instance: MeshInstance3D) -> Array[String]:
+	var names: Array[String] = []
+	for blend_shape_index: int in instance.mesh.get_blend_shape_count():
+		names.append(String(instance.mesh.get_blend_shape_name(blend_shape_index)))
+	return names
 
 
 func _assert_animations(root: Node) -> void:

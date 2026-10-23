@@ -3,7 +3,7 @@ extends TestCase
 const TUNING_PATH: String = "res://data/secondary_motion.tres"
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
 # Chain prefix -> [stiffness, drag, gravity, radius] (task 9b defaults). Skirt gravity is 0.1, not the plan's
-# 0.7: with 0.7 the flared skirt sagged onto the slim legs in the spring-bone check (see the task 9b report).
+# 0.7: see the comment in secondary_motion_tuning.gd.
 const EXPECTED_CHAINS: Dictionary[StringName, Array] = {
 	&"braid": [0.45, 0.5, 1.0, 0.03],
 	&"ahoge": [2.0, 0.15, 0.1, 0.01],
@@ -14,13 +14,37 @@ const EXPECTED_CHAINS: Dictionary[StringName, Array] = {
 	&"skirt": [1.1, 0.55, 0.1, 0.025],
 	&"braid_bow": [1.5, 0.4, 0.6, 0.02],
 }
+# Which capsules each chain family collides with. The skirt must keep off the legs and hips; the braid and the
+# neckerchief lie on the chest (the neckerchief tails hang inside the hips capsule, so not that one).
+const EXPECTED_COLLIDERS: Dictionary[StringName, Array] = {
+	&"braid": [&"chest", &"hips"],
+	&"ahoge": [],
+	&"hair_front": [],
+	&"hair_side": [],
+	&"neckerchief": [&"chest"],
+	&"sleeve": [&"chest"],
+	&"skirt": [&"thigh.L", &"thigh.R", &"hips"],
+	&"braid_bow": [&"hips", &"thigh.L", &"thigh.R"],
+}
+# Leaf bone rest lengths of the Blender rig (glTF drops bone tails, so Godot cannot measure them).
+const EXPECTED_END_BONE_LENGTHS: Dictionary[StringName, float] = {
+	&"braid_10": 0.0658, &"ahoge_03": 0.0328, &"hair_front_L_02": 0.056, &"hair_front_C_02": 0.056,
+	&"hair_front_R_02": 0.056, &"hair_side_L_03": 0.0412, &"hair_side_R_03": 0.0412, &"neckerchief_L_02": 0.0637,
+	&"neckerchief_R_02": 0.0575, &"sleeve_L_01": 0.0974, &"sleeve_R_01": 0.0974, &"skirt_00_03": 0.169,
+	&"skirt_01_03": 0.1691, &"skirt_02_03": 0.1694, &"skirt_03_03": 0.1691, &"skirt_04_03": 0.169,
+	&"skirt_05_03": 0.1691, &"skirt_06_03": 0.1694, &"skirt_07_03": 0.1691, &"braid_bow": 0.06,
+}
 const EXPECTED_COLLIDER_RADII: Dictionary[StringName, float] = {
 	&"thigh.L": 0.065,
 	&"thigh.R": 0.065,
 	&"hips": 0.12,
 	&"chest": 0.11,
 }
-const POSITION_TOLERANCE: float = 0.005
+# The bone each capsule's body part runs to, so a capsule can be checked to sit on its own body part.
+const COLLIDER_BONE_ENDS: Dictionary[StringName, StringName] = {
+	&"thigh.L": &"shin.L", &"thigh.R": &"shin.R", &"hips": &"spine", &"chest": &"neck",
+}
+const LENGTH_TOLERANCE: float = 0.001
 
 
 func _load_tuning() -> SecondaryMotionTuning:
@@ -30,6 +54,18 @@ func _load_tuning() -> SecondaryMotionTuning:
 	var tuning: SecondaryMotionTuning = load(TUNING_PATH) as SecondaryMotionTuning
 	assert_true(tuning != null, "secondary_motion.tres is a SecondaryMotionTuning")
 	return tuning
+
+
+func _load_target() -> Node:
+	if not ResourceLoader.exists(TARGET_SCENE_PATH):
+		return null
+	return (load(TARGET_SCENE_PATH) as PackedScene).instantiate()
+
+
+func _skeleton_of(root: Node) -> Skeleton3D:
+	var skeletons: Array[Node] = root.find_children("*", "Skeleton3D", true, false)
+	assert_true(not skeletons.is_empty(), "target.glb has a Skeleton3D")
+	return null if skeletons.is_empty() else skeletons[0] as Skeleton3D
 
 
 func test_secondary_motion_has_eight_chain_entries() -> void:
@@ -50,18 +86,46 @@ func test_secondary_motion_has_eight_chain_entries() -> void:
 		assert_near(setting.radius, values[3], 1e-6, "%s radius" % prefix)
 		assert_true(not setting.root_bones.is_empty(), "%s lists its chains" % prefix)
 		assert_eq(setting.root_bones.size(), setting.end_bones.size(), "%s roots and ends pair up" % prefix)
-		assert_true(setting.end_bone_length > 0.0, "%s end bone length" % prefix)
+		assert_eq(setting.end_bone_lengths.size(), setting.end_bones.size(), "%s has one end length per chain" % prefix)
+		for chain_index: int in setting.end_bones.size():
+			var end_name: StringName = StringName(setting.end_bones[chain_index])
+			assert_true(EXPECTED_END_BONE_LENGTHS.has(end_name), "%s is a known leaf bone" % end_name)
+			if EXPECTED_END_BONE_LENGTHS.has(end_name) and chain_index < setting.end_bone_lengths.size():
+				assert_near(setting.end_bone_lengths[chain_index], EXPECTED_END_BONE_LENGTHS[end_name], LENGTH_TOLERANCE,
+						"%s end bone length" % end_name)
+		assert_true(setting.extend_end_bone, "%s extends its end bone" % prefix)
+		assert_eq(setting.end_bone_direction, SkeletonModifier3D.BONE_DIRECTION_PLUS_Y, "%s bones point along +Y" % prefix)
+		assert_eq(setting.colliders, EXPECTED_COLLIDERS[prefix], "%s collider membership" % prefix)
+		for bone_name: StringName in setting.colliders:
+			assert_true(tuning.collider(bone_name) != null, "%s collides with a defined capsule %s" % [prefix, bone_name])
 	var skirt: SecondaryChainSetting = tuning.chain(&"skirt")
 	if skirt != null:
 		assert_eq(skirt.root_bones.size(), 8, "eight skirt chains")
 
 
+func test_braid_simulates_before_its_bow() -> void:
+	var tuning: SecondaryMotionTuning = _load_tuning()
+	if tuning == null:
+		return
+	var prefixes: Array[StringName] = []
+	for setting: SecondaryChainSetting in tuning.chains:
+		prefixes.append(setting.chain_prefix)
+	# The bow hangs from braid_10, so its setting must run after the braid has moved it.
+	assert_true(prefixes.find(&"braid") >= 0 and prefixes.find(&"braid") < prefixes.find(&"braid_bow"),
+			"braid comes before braid_bow")
+
+
 func test_chain_bones_and_colliders_match_the_rig() -> void:
 	var tuning: SecondaryMotionTuning = _load_tuning()
-	if tuning == null or not ResourceLoader.exists(TARGET_SCENE_PATH):
+	if tuning == null:
 		return
-	var root: Node = (load(TARGET_SCENE_PATH) as PackedScene).instantiate()
-	var skeleton: Skeleton3D = root.find_children("*", "Skeleton3D", true, false)[0] as Skeleton3D
+	var root: Node = _load_target()
+	if root == null:
+		return
+	var skeleton: Skeleton3D = _skeleton_of(root)
+	if skeleton == null:
+		root.free()
+		return
 	for setting: SecondaryChainSetting in tuning.chains:
 		for chain_index: int in setting.root_bones.size():
 			var root_bone: int = skeleton.find_bone(setting.root_bones[chain_index])
@@ -80,25 +144,70 @@ func test_chain_bones_and_colliders_match_the_rig() -> void:
 		if entry == null:
 			continue
 		assert_near(entry.radius, EXPECTED_COLLIDER_RADII[bone_name], 1e-6, "%s collider radius" % bone_name)
+		assert_true(entry.height >= 2.0 * entry.radius, "%s capsule height includes both caps" % bone_name)
 		var bone: int = skeleton.find_bone(bone_name)
-		var child: int = _first_child(skeleton, bone)
-		if bone < 0 or child < 0:
+		var part_end: int = skeleton.find_bone(COLLIDER_BONE_ENDS[bone_name])
+		assert_true(bone >= 0 and part_end >= 0, "%s collider bones exist" % bone_name)
+		if bone < 0 or part_end < 0:
 			continue
-		# Each capsule spans its bone: centred on the bone midpoint, axis along the bone.
-		var bone_rest: Transform3D = skeleton.get_bone_global_rest(bone)
-		var child_rest: Transform3D = skeleton.get_bone_global_rest(child)
-		var center: Vector3 = bone_rest * entry.position_offset
-		var expected_center: Vector3 = (bone_rest.origin + child_rest.origin) * 0.5
-		assert_true(center.distance_to(expected_center) < POSITION_TOLERANCE,
-				"%s capsule centre %s is at the bone midpoint %s" % [bone_name, center, expected_center])
-		var length: float = bone_rest.origin.distance_to(child_rest.origin)
-		assert_near(entry.height, length + 2.0 * entry.radius, POSITION_TOLERANCE, "%s capsule spans the bone" % bone_name)
+		# The capsule is fitted to the body, not centred on the bone, but it must sit on its own body part.
+		var segment: PackedVector3Array = _capsule_segment(skeleton, entry)
+		var center: Vector3 = (segment[0] + segment[1]) * 0.5
+		var on_bone: Vector3 = Geometry3D.get_closest_point_to_segment(center,
+				skeleton.get_bone_global_rest(bone).origin, skeleton.get_bone_global_rest(part_end).origin)
+		assert_true(center.distance_to(on_bone) < entry.radius,
+				"%s capsule centre %s lies within its radius of the bone" % [bone_name, center])
 	root.free()
 
 
-func _first_child(skeleton: Skeleton3D, bone: int) -> int:
-	var preferred: Dictionary[String, String] = {"thigh.L": "shin.L", "thigh.R": "shin.R", "hips": "spine", "chest": "neck"}
-	var bone_name: String = skeleton.get_bone_name(bone)
-	if preferred.has(bone_name):
-		return skeleton.find_bone(preferred[bone_name])
-	return -1
+func test_every_joint_clears_its_colliders_at_rest() -> void:
+	var tuning: SecondaryMotionTuning = _load_tuning()
+	if tuning == null:
+		return
+	var root: Node = _load_target()
+	if root == null:
+		return
+	var skeleton: Skeleton3D = _skeleton_of(root)
+	if skeleton == null:
+		root.free()
+		return
+	for setting: SecondaryChainSetting in tuning.chains:
+		for chain_index: int in setting.root_bones.size():
+			var joints: Dictionary[String, Vector3] = _non_root_joints(skeleton, setting, chain_index)
+			for collider_bone: StringName in setting.colliders:
+				var entry: SecondaryCollider = tuning.collider(collider_bone)
+				if entry == null:
+					continue
+				var segment: PackedVector3Array = _capsule_segment(skeleton, entry)
+				for joint_name: String in joints:
+					var joint: Vector3 = joints[joint_name]
+					var closest: Vector3 = Geometry3D.get_closest_point_to_segment(joint, segment[0], segment[1])
+					var clearance: float = joint.distance_to(closest) - entry.radius - setting.radius
+					assert_true(clearance >= 0.0, "%s clears the %s capsule at rest (%.4f m)" % [joint_name, collider_bone, clearance])
+	root.free()
+
+
+## Rest positions of every simulated joint after the fixed root: the heads of the chain's other bones and the
+## extended tip.
+func _non_root_joints(skeleton: Skeleton3D, setting: SecondaryChainSetting, chain_index: int) -> Dictionary[String, Vector3]:
+	var joints: Dictionary[String, Vector3] = {}
+	var root_bone: int = skeleton.find_bone(setting.root_bones[chain_index])
+	var end_bone: int = skeleton.find_bone(setting.end_bones[chain_index])
+	if root_bone < 0 or end_bone < 0:
+		return joints
+	var walker: int = end_bone
+	while walker >= 0 and walker != root_bone:
+		joints[skeleton.get_bone_name(walker)] = skeleton.get_bone_global_rest(walker).origin
+		walker = skeleton.get_bone_parent(walker)
+	if setting.extend_end_bone and chain_index < setting.end_bone_lengths.size():
+		joints[setting.end_bones[chain_index] + " tip"] = (skeleton.get_bone_global_rest(end_bone)
+				* Vector3(0.0, setting.end_bone_lengths[chain_index], 0.0))
+	return joints
+
+
+## The capsule's axis end points (cap centres) in skeleton rest space.
+func _capsule_segment(skeleton: Skeleton3D, entry: SecondaryCollider) -> PackedVector3Array:
+	var bone_rest: Transform3D = skeleton.get_bone_global_rest(skeleton.find_bone(entry.bone))
+	var capsule: Transform3D = bone_rest * Transform3D(Basis(entry.rotation_offset), entry.position_offset)
+	var half: float = maxf(0.0, entry.height * 0.5 - entry.radius)
+	return PackedVector3Array([capsule * Vector3(0.0, -half, 0.0), capsule * Vector3(0.0, half, 0.0)])

@@ -55,7 +55,7 @@ class FaceLayout:
     eye_height = 0.047
     nose_z = -0.066
     mouth_z = -0.091
-    brow_z = -0.002
+    brow_z = -0.006
 
 
 def head_center(armature) -> Vector:
@@ -458,7 +458,7 @@ class _FaceBuilder:
             arch = 0.004 * math.sin(math.pi * s)
             tilt = expression.brow_tilt * (0.5 - s) * 0.012
             z = FaceLayout.brow_z + arch + expression.brow_raise - tilt
-            thickness = 0.0024 * (1.0 - 0.6 * s)
+            thickness = 0.0030 * (1.0 - 0.6 * s)
             x = side * (FaceLayout.eye_center_x + (s - 0.5) * FaceLayout.eye_width * 1.05)
             vertices += [self.project(x, z + thickness, 0.0016), self.project(x, z - thickness * 0.4, 0.0016)]
         self._strip(parts, FACE, vertices, side, FACE_BROW)
