@@ -34,11 +34,12 @@ var _is_walking: bool = false
 var _look_around_seconds_left: float = 0.0
 
 @onready var _model: Node3D = $Model
+@onready var _character_body_shape: CharacterBodyShape = $CharacterBodyShape
 @onready var _alert_label: Label3D = $AlertLabel
 
 
 func _ready() -> void:
-	_attach_model(_model, $CharacterBodyShape as CharacterBodyShape, ANIMATION_IDLE, ANIMATION_WALK)
+	_attach_model(_model, _character_body_shape, ANIMATION_IDLE, ANIMATION_WALK)
 	_alert_label.visible = false
 
 

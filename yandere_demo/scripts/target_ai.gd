@@ -322,7 +322,7 @@ func notice(toward: Vector3) -> void:
 	if state == State.GONE or state == State.REPORTING:
 		return
 	look_toward(toward)
-	if REACTION_STATES.has(state):
+	if is_reacting():
 		return
 	_expression.set_expression(EXPRESSION_SUSPICIOUS)
 	_begin_reaction(State.NOTICE, ANIMATION_NOTICE)
@@ -379,7 +379,7 @@ func look_toward(point: Vector3) -> void:
 
 ## A heard footstep: his head turns toward it for `hearing_turn_seconds`, and he keeps doing what he does.
 func glance_at(point: Vector3) -> void:
-	if state == State.GONE or state == State.REPORTING or REACTION_STATES.has(state):
+	if state == State.GONE or state == State.REPORTING or is_reacting():
 		return
 	look_toward(point)
 	_glance_seconds_left = tuning.hearing_turn_seconds
@@ -605,8 +605,8 @@ func _remaining_path_length() -> float:
 
 
 func _speed_scale() -> float:
-	var scale: float = _planned.walk_speed_scale if _planned != null else 1.0
-	return scale * tuning.calm_speed_scale if _calm_seconds_left > 0.0 else scale
+	var planned_scale: float = _planned.walk_speed_scale if _planned != null else 1.0
+	return planned_scale * tuning.calm_speed_scale if _calm_seconds_left > 0.0 else planned_scale
 
 
 func _begin_due_micro_stop() -> bool:
@@ -818,7 +818,7 @@ func _step_leaving(delta: float) -> void:
 
 
 func _begin_reaction(reaction: State, animation_name: StringName) -> void:
-	if not REACTION_STATES.has(state):
+	if not is_reacting():
 		_resume_state = state
 		_resume_animation = _current_animation
 	_reaction_seconds = 0.0
@@ -878,7 +878,7 @@ func _step_glance(delta: float) -> void:
 	if _glance_seconds_left <= 0.0:
 		return
 	_glance_seconds_left -= delta
-	if _glance_seconds_left <= 0.0 and not REACTION_STATES.has(state):
+	if _glance_seconds_left <= 0.0 and not is_reacting():
 		_end_head_turn()
 
 
