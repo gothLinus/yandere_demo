@@ -7,6 +7,7 @@ Standing clips start from the target's idle stance and seated clips from his sea
 """
 
 import math
+from dataclasses import dataclass
 
 import bpy
 from mathutils import Quaternion, Vector
@@ -20,25 +21,65 @@ from .character_animation import (
 
 WALK = GaitParams(speed=1.3, frame_count=32)
 
-TARGET_STANCE = Stance(
-    idle_feet={
-        ".L": FootPlacement(0.074, 0.004, 7.0),
-        ".R": FootPlacement(-0.082, -0.036, -12.0),
-    },
-    idle_hips_offset=Vector((0.011, 0.0, -0.017)),
-    idle_hips=(0.0, -2.5, 1.5),
-    idle_spine=(1.0, 1.8, -0.8),
-    idle_chest=(0.5, 1.6, -0.5),
-    idle_neck=(1.0, -0.8, 0.0),
-    idle_head=(2.0, -2.5, 0.0),
-    idle_arm=ArmSpec(adduct=23.0, swing=5.0, elbow=20.0, hand=(0.0, -2.0, 0.0), fingers=18.0, thumb=10.0),
-    seat_height=0.45,
-    seat_clearance=0.085,
-    # Centre of the M_Mouth strip on TargetFace in the rest pose.
-    mouth=Vector((0.0, -0.0738, 1.3968)),
-    # Below the chest the braid hangs free over the waist and skirt.
-    hanging_bones=("braid_06", "braid_07", "braid_08", "braid_09", "braid_10"),
-)
+# Foot placements as (x, y, yaw, heel pitch) offsets from the rest ankles, so they fit any build of legs.
+IDLE_FEET = {".L": (0.001, -0.008, 7.0, 0.0), ".R": (-0.009, -0.048, -12.0, 0.0)}
+# The cradling hand is this far down the braid (fraction of its length); the stroking hand runs between the next two.
+BRAID_CRADLE_FRACTION = 0.54
+BRAID_STROKE_FRACTIONS = (0.32, 0.51)
+# The braid bones the cradling hand lifts forward off the chest lie between these fractions of its length.
+BRAID_HELD_FRACTIONS = (0.2, 0.5)
+
+
+def rest_relative_feet(rest_ankles: dict, offsets: dict) -> dict:
+    return {side: FootPlacement(rest_ankles[side].x + x, rest_ankles[side].y + y, yaw, pitch)
+            for side, (x, y, yaw, pitch) in offsets.items()}
+
+
+def rig_feet(rig: CharacterRig, offsets: dict) -> dict:
+    return rest_relative_feet({side: rig.feet[side].ankle for side in SIDES}, offsets)
+
+
+def target_stance(rest_ankles: dict, mouth: Vector, hanging_bones: tuple, seat_clearance: float, heel_back: float,
+                  lap_offset: Vector) -> Stance:
+    """The target's idle and seated acting; every landmark argument is measured on the model."""
+    return Stance(
+        idle_feet=rest_relative_feet(rest_ankles, IDLE_FEET),
+        idle_hips_offset=Vector((0.011, 0.0, -0.017)),
+        idle_hips=(0.0, -2.5, 1.5),
+        idle_spine=(1.0, 1.8, -0.8),
+        idle_chest=(0.5, 1.6, -0.5),
+        idle_neck=(1.0, -0.8, 0.0),
+        idle_head=(2.0, -2.5, 0.0),
+        idle_arm=ArmSpec(adduct=23.0, swing=5.0, elbow=20.0, hand=(0.0, -2.0, 0.0), fingers=18.0, thumb=10.0),
+        seat_height=0.45,
+        seat_clearance=seat_clearance,
+        heel_back=heel_back,
+        lap_offset=lap_offset,
+        mouth=mouth,
+        hanging_bones=hanging_bones,
+    )
+
+
+@dataclass
+class BraidLayout:
+    """The target's braid as the clips use it: its bones root first, and the meshes that carry its hair and bow."""
+
+    bones: tuple
+    bow_bones: tuple
+    meshes: tuple
+    # Bones at skirt height: they swing out so the braid and its bow rest on the skirt instead of sinking into it.
+    resting_bones: tuple
+
+    def point(self, fraction: float) -> tuple:
+        """(bone, fraction along that bone) at a fraction of the braid's length, counted bone by bone."""
+        position = min(max(fraction, 0.0), 1.0) * len(self.bones)
+        index = min(int(position), len(self.bones) - 1)
+        return self.bones[index], position - index
+
+    def held_bones(self) -> tuple:
+        first = int(BRAID_HELD_FRACTIONS[0] * len(self.bones))
+        last = int(BRAID_HELD_FRACTIONS[1] * len(self.bones))
+        return self.bones[first:last]
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -270,10 +311,8 @@ def clip_drink(rig: CharacterRig, frame: float) -> BodySpec:
 
 BRAID_HOLD_LIFT = Curve([(0, 0.0), (22, 1.0), (112, 1.0), (136, 0.0), (150, 0.0)], period=150.0)
 BRAID_REACH = Curve([(0, 0.0), (14, 0.0), (30, 1.0), (124, 1.0), (140, 0.0), (150, 0.0)], period=150.0)
-# Where along the braid (bone index, fraction along that bone) the hands work: the braid lies in the hand.
-BRAID_CRADLE = ("braid_06", 0.4)
-BRAID_STROKE_TOP = ("braid_04", 0.2)
-BRAID_STROKE_BOTTOM = ("braid_06", 0.1)
+# The cradling hand lifts the held braid bones forward off the chest by this much in total (pitch, roll).
+BRAID_HELD_LIFT = (-12.0, -2.0)
 RIGHT_BRAID_AIM = ((0.75, 0.40, 0.25), (0.15, 0.45, 0.88))
 LEFT_BRAID_AIM = ((-0.8, 0.30, -0.45), (-0.30, 0.90, 0.20))
 
@@ -295,7 +334,16 @@ def fix_braid_curves(rig: CharacterRig) -> dict:
     return {"stroke": STROKE, "away": STROKE_AWAY}
 
 
-def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
+def held_braid_rotations(braid: BraidLayout, amount: float) -> dict:
+    """The held bones bend in a bump that peaks mid-way, summing to BRAID_HELD_LIFT at full `amount`."""
+    held = braid.held_bones()
+    shares = [math.sin(math.pi * (index + 1) / (len(held) + 1)) for index in range(len(held))]
+    total = sum(shares)
+    pitch, roll = BRAID_HELD_LIFT
+    return {bone: (pitch * amount * share / total, roll * amount * share / total, 0.0) for bone, share in zip(held, shares)}
+
+
+def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict, braid: BraidLayout) -> BodySpec:
     spec = rig.idle_body(frame, 150.0)
     lift = BRAID_HOLD_LIFT.scalar(frame)
     reach = BRAID_REACH.scalar(frame)
@@ -304,22 +352,18 @@ def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
     spec.chest = add_degrees(spec.chest, (2.0 * lift, -1.5 * lift, -4.0 * lift))
     spec.neck = add_degrees(spec.neck, (3.0 * lift, -3.0 * lift, -3.0 * lift))
     spec.head = add_degrees(spec.head, (4.0 * lift, -7.0 * lift, -5.0 * lift))
-    held = lift * 0.7
-    # The cradling hand lifts the braid forward off the chest.
-    spec.extra_rotations = {
-        "braid_03": (-3.0 * held, 0.0, 0.0),
-        "braid_04": (-6.0 * held, -2.0 * held, 0.0),
-        "braid_05": (-3.0 * held, 0.0, 0.0),
-    }
+    spec.extra_rotations = held_braid_rotations(braid, lift * 0.7)
+    cradle = braid.point(BRAID_CRADLE_FRACTION)
+    stroke_top, stroke_bottom = (braid.point(fraction) for fraction in BRAID_STROKE_FRACTIONS)
     idle_right = rig.idle_wrists[".R"]
     idle_left = rig.idle_wrists[".L"]
 
     def right_wrist(pose) -> Vector:
-        return idle_right.lerp(palm_on(_braid_landmark(rig, pose, BRAID_CRADLE), RIGHT_BRAID_AIM), lift)
+        return idle_right.lerp(palm_on(_braid_landmark(rig, pose, cradle), RIGHT_BRAID_AIM), lift)
 
     def left_wrist(pose) -> Vector:
-        top = _braid_landmark(rig, pose, BRAID_STROKE_TOP)
-        bottom = _braid_landmark(rig, pose, BRAID_STROKE_BOTTOM)
+        top = _braid_landmark(rig, pose, stroke_top)
+        bottom = _braid_landmark(rig, pose, stroke_bottom)
         on_braid = palm_on(top.lerp(bottom, stroke), LEFT_BRAID_AIM)
         lifted_off = on_braid + Vector((0.03, -0.05, 0.0)) * math.sin(math.pi * min(1.0, away * 2.0))
         homeward = max(0.0, away * 2.0 - 1.0)
@@ -347,10 +391,7 @@ CHAT_LAUGH = Curve([(0, 0.0), (52, 0.0), (66, 1.0), (82, 1.0), (96, 0.0), (120, 
 CHAT_NOD = Curve([(0, 0.0), (98, 0.0), (102, 1.0), (106, 0.0), (110, 1.0), (114, 0.0), (120, 0.0)], period=120.0)
 # The giggling hand covers the mouth from just in front of it, fingertips up around the nose.
 CHAT_HAND_FROM_MOUTH = Vector((-0.035, -0.03, -0.105))
-CHAT_FEET = {
-    ".L": FootPlacement(0.095, -0.06, 16.0),
-    ".R": FootPlacement(-0.07, 0.01, -8.0),
-}
+CHAT_FEET = {".L": (0.022, -0.072, 16.0, 0.0), ".R": (0.003, -0.002, -8.0, 0.0)}
 
 
 def clip_lean_chat(rig: CharacterRig, frame: float) -> BodySpec:
@@ -360,7 +401,7 @@ def clip_lean_chat(rig: CharacterRig, frame: float) -> BodySpec:
     laugh = CHAT_LAUGH.scalar(frame)
     nod = CHAT_NOD.scalar(frame)
     giggle = laugh * math.sin(2.0 * math.pi * (frame - 64.0) / 6.0) if 64 <= frame <= 82 else 0.0
-    spec.feet = dict(CHAT_FEET)
+    spec.feet = rig_feet(rig, CHAT_FEET)
     spec.hips_offset = Vector((-0.02 + 0.003 * math.sin(2.0 * math.pi * phase), -0.01, -0.02))
     spec.hips = (1.0, 4.0, -4.0)
     spec.spine = (3.0, -2.5, 3.0 + 2.0 * gesture)
@@ -399,10 +440,7 @@ def _blend_aim(first: tuple, second: tuple, weight: float) -> tuple:
     return (Vector(first[0]).lerp(Vector(second[0]), weight), Vector(first[1]).lerp(Vector(second[1]), weight))
 
 
-SWEEP_FEET = {
-    ".L": FootPlacement(0.12, -0.08, 14.0),
-    ".R": FootPlacement(-0.11, 0.07, -18.0),
-}
+SWEEP_FEET = {".L": (0.047, -0.092, 14.0, 0.0), ".R": (-0.037, 0.058, -18.0, 0.0)}
 
 
 def clip_sweep(rig: CharacterRig, frame: float) -> BodySpec:
@@ -410,7 +448,7 @@ def clip_sweep(rig: CharacterRig, frame: float) -> BodySpec:
     phase = frame / 60.0
     stroke = math.sin(2.0 * math.pi * phase)
     lagged = math.sin(2.0 * math.pi * (phase - 0.06))
-    spec.feet = dict(SWEEP_FEET)
+    spec.feet = rig_feet(rig, SWEEP_FEET)
     spec.breath_amount = 0.5
     spec.hips_offset = Vector((0.012 * lagged, 0.012, -0.045 + 0.006 * math.cos(4.0 * math.pi * phase)))
     spec.hips = (8.0, -2.0 * lagged, -4.0 + 5.0 * lagged)
@@ -468,10 +506,7 @@ def clip_wave(rig: CharacterRig, frame: float) -> BodySpec:
     return spec
 
 
-SHY_FEET = {
-    ".L": FootPlacement(0.050, 0.000, -6.0),
-    ".R": FootPlacement(-0.055, -0.020, 10.0),
-}
+SHY_FEET = {".L": (-0.023, -0.012, -6.0, 0.0), ".R": (0.018, -0.032, 10.0, 0.0)}
 
 
 def clip_idle_shy(rig: CharacterRig, frame: float) -> BodySpec:
@@ -480,7 +515,7 @@ def clip_idle_shy(rig: CharacterRig, frame: float) -> BodySpec:
     sway = math.sin(2.0 * math.pi * phase)
     fidget = math.sin(2.0 * math.pi * 2.0 * phase)
     spec = rig.idle_body(frame, 120.0)
-    spec.feet = dict(SHY_FEET)
+    spec.feet = rig_feet(rig, SHY_FEET)
     spec.hips_offset = Vector((0.016 + 0.003 * sway, 0.004, -0.022))
     spec.hips = (1.0, -3.0 + 0.6 * sway, 2.0)
     spec.spine = (2.0, 2.0, -1.5)
@@ -499,10 +534,7 @@ def clip_idle_shy(rig: CharacterRig, frame: float) -> BodySpec:
     return spec
 
 
-PLAYFUL_FEET = {
-    ".L": FootPlacement(0.060, 0.000, 8.0),
-    ".R": FootPlacement(-0.050, 0.070, -14.0, pitch_degrees=30.0),
-}
+PLAYFUL_FEET = {".L": (-0.013, -0.012, 8.0, 0.0), ".R": (0.023, 0.058, -14.0, 30.0)}
 
 
 def clip_idle_playful(rig: CharacterRig, frame: float) -> BodySpec:
@@ -511,8 +543,8 @@ def clip_idle_playful(rig: CharacterRig, frame: float) -> BodySpec:
     bounce = 0.5 - 0.5 * math.cos(2.0 * math.pi * 3.0 * phase)
     sway = math.sin(2.0 * math.pi * phase)
     spec = rig.idle_body(frame, 90.0)
-    spec.feet = dict(PLAYFUL_FEET)
-    spec.feet[".R"] = FootPlacement(-0.050, 0.070, -14.0, pitch_degrees=30.0 + 6.0 * bounce)
+    x, y, yaw, pitch = PLAYFUL_FEET[".R"]
+    spec.feet = rig_feet(rig, {**PLAYFUL_FEET, ".R": (x, y, yaw, pitch + 6.0 * bounce)})
     spec.hips_offset = Vector((0.020 + 0.004 * sway, 0.006, -0.018 - 0.008 * bounce))
     spec.hips = (0.0, 6.0, 3.0 + 2.0 * sway)
     spec.spine = (-1.0, -3.0, -2.0)
@@ -531,10 +563,7 @@ def clip_idle_playful(rig: CharacterRig, frame: float) -> BodySpec:
     return spec
 
 
-CONFIDENT_FEET = {
-    ".L": FootPlacement(0.110, -0.075, 18.0),
-    ".R": FootPlacement(-0.045, 0.005, -9.0),
-}
+CONFIDENT_FEET = {".L": (0.037, -0.087, 18.0, 0.0), ".R": (0.028, -0.007, -9.0, 0.0)}
 
 
 def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
@@ -542,7 +571,7 @@ def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
     phase = frame / 120.0
     sway = math.sin(2.0 * math.pi * phase)
     spec = rig.idle_body(frame, 120.0)
-    spec.feet = dict(CONFIDENT_FEET)
+    spec.feet = rig_feet(rig, CONFIDENT_FEET)
     spec.hips_offset = Vector((-0.024 + 0.003 * sway, 0.0, -0.02))
     spec.hips = (0.0, 4.5, -5.0)
     spec.spine = (-1.5, -2.5, 3.0)
@@ -564,19 +593,13 @@ def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
 
 # ---------------------------------------------------------------------------------------------------
 
-# The braid's lower bones swing out so the plait and its bow rest on the skirt; samples cover the hair hanging at
-# skirt height and the bow.
-BRAID_RESTING_SAMPLE_BONES = ("braid_07", "braid_08", "braid_09", "braid_10", "braid_bow")
-BRAID_RESTING_LIFT_BONES = ("braid_07", "braid_08", "braid_09", "braid_10")
-
-
-def target_clips(rig: CharacterRig, braid_resting: animation.SkirtResting | None = None) -> list:
+def target_clips(rig: CharacterRig, braid: BraidLayout, braid_resting: animation.SkirtResting | None = None) -> list:
     """(name, frame count, loops, poses) for every target clip."""
     walk = WalkCycle(rig.skeleton, WALK)
     notice = {name: Curve(keys) for name, keys in NOTICE_KEYS.items()}
     startled = startled_curves(rig)
     sit_down = sit_down_curves(rig)
-    braid = fix_braid_curves(rig)
+    braid_curves = fix_braid_curves(rig)
     stand_up = stand_up_curves(rig)
     clips = [
         ("target_idle", 90, True, lambda frame: clip_idle(rig, frame)),
@@ -590,7 +613,7 @@ def target_clips(rig: CharacterRig, braid_resting: animation.SkirtResting | None
         ("target_sit_read", 120, True, lambda frame: clip_sit_read(rig, frame)),
         ("target_phone", 120, True, lambda frame: clip_phone(rig, frame)),
         ("target_drink", 120, True, lambda frame: clip_drink(rig, frame)),
-        ("target_fix_braid", 150, True, lambda frame: clip_fix_braid(rig, frame, braid)),
+        ("target_fix_braid", 150, True, lambda frame: clip_fix_braid(rig, frame, braid_curves, braid)),
         ("target_lean_chat", 120, True, lambda frame: clip_lean_chat(rig, frame)),
         ("target_sweep", 60, True, lambda frame: clip_sweep(rig, frame)),
         ("target_wave", 45, True, lambda frame: clip_wave(rig, frame)),
@@ -609,16 +632,17 @@ def target_clips(rig: CharacterRig, braid_resting: animation.SkirtResting | None
     return composed
 
 
-def build_target_actions(armature) -> list:
+def build_target_actions(armature, stance: Stance, braid: BraidLayout) -> list:
     """Key every target clip onto `armature` (one muted NLA track each) and leave it in its rest pose."""
-    rig = CharacterRig(armature, TARGET_STANCE)
+    rig = CharacterRig(armature, stance)
     prefix = armature.name.removesuffix("Char")
+    # The braid's lower bones swing out so the plait and its bow rest on the skirt; samples cover the hair hanging at
+    # skirt height and the bow.
     braid_resting = animation.SkirtResting(
-        armature, rig.skeleton, bpy.data.objects[f"{prefix}Skirt"],
-        [bpy.data.objects[f"{prefix}Braid"], bpy.data.objects[f"{prefix}Accessories"]],
-        BRAID_RESTING_SAMPLE_BONES, BRAID_RESTING_LIFT_BONES)
+        armature, rig.skeleton, bpy.data.objects[f"{prefix}Skirt"], [bpy.data.objects[name] for name in braid.meshes],
+        braid.resting_bones + braid.bow_bones, braid.resting_bones)
     actions = []
-    for name, frame_count, loops, poses in target_clips(rig, braid_resting):
+    for name, frame_count, loops, poses in target_clips(rig, braid, braid_resting):
         actions.append(animation.build_clip(armature, rig.skeleton, name, frame_count, loops, poses))
     armature.animation_data.action = None
     for pose_bone in armature.pose.bones:

@@ -1,19 +1,17 @@
 extends TestCase
 
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
-const REQUIRED_BONES: Array[String] = ["head", "braid_10", "skirt_07_03", "ahoge_03", "index_03.L"]
+const REQUIRED_BONES: Array[String] = ["head", "hand.R", "index_03.L", "braid_01", "skirt_07_03"]
+# Every expression ExpressionController drives, baked from the model's flexes onto the face mesh.
 const REQUIRED_BLEND_SHAPES: Array[String] = [
-	"neutral", "startled", "suspicious", "happy", "blink",
-	"smile", "sad", "blush", "wink_L", "wink_R", "mouth_A", "mouth_I", "mouth_U", "mouth_E", "mouth_O",
+	"neutral", "startled", "suspicious", "happy", "blink", "smile", "sad", "blush", "wink_L", "wink_R",
+	"mouth_A", "mouth_I", "mouth_U", "mouth_E", "mouth_O", "pupil_small", "pupil_large",
 ]
-# Pupil size and highlight controls, on the face and on the eyes (the pupil discs live on TargetEyes).
-const PUPIL_BLEND_SHAPES: Array[String] = ["pupil_small", "pupil_large"]
-const PUPIL_MESHES: Array[String] = ["TargetFace", "TargetEyes"]
+const FACE_MESH: String = "TargetFace"
 const REQUIRED_MESHES: Array[String] = [
-	"TargetBody", "TargetFace", "TargetEyes", "TargetLashes", "TargetHair", "TargetBraid", "TargetTop",
-	"TargetNeckerchief", "TargetSkirt", "TargetSocks", "TargetShoes", "TargetAccessories", "TargetBlush",
+	"TargetBody", "TargetFace", "TargetHair", "TargetTop", "TargetSkirt", "TargetSocks", "TargetShoes",
 ]
-const SHADOWLESS_MESHES: Array[String] = ["TargetHair", "TargetBlush"]
+const SHADOWLESS_MESHES: Array[String] = ["TargetHair"]
 const PROXY_MATERIAL_NAME: String = "M_CollisionProxy"
 const ANIMATION_FPS: float = 30.0
 # Clip name -> frame count at 30 fps.
@@ -61,24 +59,18 @@ func test_target_glb_structure() -> void:
 	assert_eq(skeletons.size(), 1, "one Skeleton3D")
 	if not skeletons.is_empty():
 		var skeleton: Skeleton3D = skeletons[0] as Skeleton3D
+		assert_eq(String(skeleton.get_parent().name), "TargetChar", "the skeleton sits under the TargetChar armature root")
 		for bone_name: String in REQUIRED_BONES:
 			assert_true(skeleton.find_bone(bone_name) >= 0, "bone %s exists" % bone_name)
 
 	for mesh_name: String in REQUIRED_MESHES:
 		assert_true(root.find_child(mesh_name, true, false) is MeshInstance3D, "mesh %s exists" % mesh_name)
 
-	var face: MeshInstance3D = root.find_child("TargetFace", true, false) as MeshInstance3D
+	var face: MeshInstance3D = root.find_child(FACE_MESH, true, false) as MeshInstance3D
 	if face != null:
 		var blend_shape_names: Array[String] = _blend_shape_names(face)
 		for blend_shape_name: String in REQUIRED_BLEND_SHAPES:
-			assert_true(blend_shape_names.has(blend_shape_name), "blend shape %s exists" % blend_shape_name)
-	for mesh_name: String in PUPIL_MESHES:
-		var pupil_mesh: MeshInstance3D = root.find_child(mesh_name, true, false) as MeshInstance3D
-		assert_true(pupil_mesh != null, "%s exists for the pupil controls" % mesh_name)
-		if pupil_mesh == null:
-			continue
-		for blend_shape_name: String in PUPIL_BLEND_SHAPES:
-			assert_true(_blend_shape_names(pupil_mesh).has(blend_shape_name), "%s has %s" % [mesh_name, blend_shape_name])
+			assert_true(blend_shape_names.has(blend_shape_name), "%s has blend shape %s" % [FACE_MESH, blend_shape_name])
 
 	assert_true(root.has_meta("body_shape"), "root has body_shape meta")
 	if root.has_meta("body_shape"):
