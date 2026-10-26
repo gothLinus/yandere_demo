@@ -1,10 +1,12 @@
 extends VisualCapture
-## Windowed gameplay captures (Task 22). The default run plays one test-mode day on main.tscn and saves the hallway,
-## courtyard, viewfinder and Yandere Vision shots, the hide spots, the camera prop and every UI screen, then the
-## main menu and the stranger and cherry-tree endings. With `-- --movie` it instead frames one seated activity for a movie capture:
-##   godot --path yandere_demo --write-movie <dir>/frame.png --fixed-fps 30 res://tests/visual/capture_gameplay.tscn -- --movie
-## `--movie-activity=<id>` picks the activity (default read_bench, a walk -> target_sit_down -> target_sit_read);
-## the run quits MOVIE_SECONDS after the walk starts and prints that frame's number.
+## Windowed gameplay captures (Task 22). The default run plays one test-mode day on main.tscn. It saves the hallway,
+## courtyard, viewfinder and Yandere Vision shots, the hide spots, the camera prop and every UI screen, then the main
+## menu and the stranger and cherry-tree endings.
+## With `-- --movie` it frames one seated activity instead, for a movie capture:
+##   godot --path yandere_demo --write-movie <dir>/frame.png --fixed-fps 30 \
+##       res://tests/visual/capture_gameplay.tscn -- --movie
+## `--movie-activity=<id>` picks the activity (default read_bench: walk -> target_sit_down -> target_sit_read). The run
+## quits MOVIE_SECONDS after the walk starts and logs the frame numbers of each step.
 
 const MAIN_SCENE: PackedScene = preload("res://scenes/main.tscn")
 const MAIN_MENU_SCENE: PackedScene = preload("res://scenes/ui/main_menu.tscn")
@@ -148,7 +150,8 @@ func _capture_courtyard() -> void:
 		var foliage: Node3D = _school_env.find_child("CherryFoliage_%02d" % tree_index, true, false) as Node3D
 		if foliage == null:
 			continue
-		var center: Vector3 = (foliage as MeshInstance3D).global_transform * (foliage as MeshInstance3D).get_aabb().get_center()
+		var crown: MeshInstance3D = foliage as MeshInstance3D
+		var center: Vector3 = crown.global_transform * crown.get_aabb().get_center()
 		_look_from(center + Vector3(6.0, -1.5, 6.0), center + Vector3(0.0, -1.5, 0.0))
 		await save_capture("cherry_tree_%02d" % tree_index)
 	_look_from(_school_env.marker("EndingStand_Player").global_position + Vector3(0.0, 1.5, 0.0),
@@ -244,7 +247,8 @@ func _capture_ending(ending_id: StringName) -> void:
 		await school_env.navigation_ready
 	var started_msec: int = Time.get_ticks_msec()
 	ending.ending_finished.connect(func(_id: StringName) -> void:
-		print("ENDING %s finished after %.1f s (time scale %.1f)" % [ending_id, (Time.get_ticks_msec() - started_msec) / 1000.0, Engine.time_scale]))
+		var seconds: float = (Time.get_ticks_msec() - started_msec) / 1000.0
+		print("ENDING %s finished after %.1f s (time scale %.1f)" % [ending_id, seconds, Engine.time_scale]))
 	ending.play(ending_id, WeekProgress.new())
 	var elapsed: float = 0.0
 	for capture_second: float in ENDING_CAPTURE_SECONDS:
@@ -268,9 +272,11 @@ func _run_movie(activity_id: StringName) -> void:
 	var anchor: Node3D = _school_env.anchors_for(activity_id)[0]
 	var anchor_forward: Vector3 = -anchor.global_basis.z
 	var side: Vector3 = anchor_forward.cross(Vector3.UP)
-	_target.global_position = _closest_navigation_point(anchor.global_position + anchor_forward * MOVIE_WALK_DISTANCE * 0.6 + side * MOVIE_WALK_DISTANCE * 0.8)
+	var start_offset: Vector3 = (anchor_forward * 0.6 + side * 0.8) * MOVIE_WALK_DISTANCE
+	_target.global_position = _closest_navigation_point(anchor.global_position + start_offset)
 	# Three-quarter front view of the seat, far enough back to hold the whole walk.
-	_look_from(anchor.global_position + anchor_forward * 3.2 - side * 2.0 + Vector3.UP * 1.5, anchor.global_position + Vector3.UP * 0.7)
+	var camera_offset: Vector3 = anchor_forward * 3.2 - side * 2.0 + Vector3.UP * 1.5
+	_look_from(anchor.global_position + camera_offset, anchor.global_position + Vector3.UP * 0.7)
 	await get_tree().physics_frame
 	_target.start_plan([_planned(activity_id, 0)])
 	print("MOVIE %s walk starts at frame %d" % [activity_id, Engine.get_process_frames()])
@@ -278,7 +284,10 @@ func _run_movie(activity_id: StringName) -> void:
 		print("MOVIE activity %s started at frame %d" % [activity.id, Engine.get_process_frames()]))
 	for second: int in int(MOVIE_SECONDS):
 		await wait_seconds(1.0)
-		print("MOVIE t=%d s at frame %d: %s, %.2f m from the anchor" % [second + 1, Engine.get_process_frames(), TargetAI.State.keys()[_target.state], _target.global_position.distance_to(anchor.global_position)])
+		var state_name: String = TargetAI.State.keys()[_target.state]
+		var anchor_distance: float = _target.global_position.distance_to(anchor.global_position)
+		print("MOVIE t=%d s at frame %d: %s, %.2f m from the anchor" % [
+				second + 1, Engine.get_process_frames(), state_name, anchor_distance])
 	print("MOVIE ends at frame %d" % Engine.get_process_frames())
 
 
