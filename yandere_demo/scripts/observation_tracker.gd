@@ -17,10 +17,11 @@ var _was_noticed: bool = false
 
 
 func bind(watching_player: StealthPlayer, new_target: TargetAI, new_meters: StealthMeters, new_day_run: DayRun, new_banked_intel: Array[StringName]) -> void:
-	if target != null:
-		target.activity_started.disconnect(_on_activity_started)
-		target.activity_completed.disconnect(_on_activity_completed)
-		meters.noticed.disconnect(_on_noticed)
+	_disconnect_previous()
+	_is_tracking = false
+	watched_seconds = 0.0
+	_activity_seconds = 0.0
+	_was_noticed = false
 	player = watching_player
 	target = new_target
 	meters = new_meters
@@ -29,6 +30,16 @@ func bind(watching_player: StealthPlayer, new_target: TargetAI, new_meters: Stea
 	target.activity_started.connect(_on_activity_started)
 	target.activity_completed.connect(_on_activity_completed)
 	meters.noticed.connect(_on_noticed)
+
+
+func _disconnect_previous() -> void:
+	if is_instance_valid(target):
+		if target.activity_started.is_connected(_on_activity_started):
+			target.activity_started.disconnect(_on_activity_started)
+		if target.activity_completed.is_connected(_on_activity_completed):
+			target.activity_completed.disconnect(_on_activity_completed)
+	if meters != null and meters.noticed.is_connected(_on_noticed):
+		meters.noticed.disconnect(_on_noticed)
 
 
 func _physics_process(delta: float) -> void:

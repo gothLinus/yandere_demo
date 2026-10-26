@@ -264,7 +264,6 @@ func _set_mode(new_mode: StringName) -> void:
 
 
 func _poll_actions() -> void:
-	is_vision_active = Input.is_action_pressed(&"yandere_vision")
 	if Input.is_action_just_pressed(&"camera_mode"):
 		if mode == MODE_CAMERA:
 			exit_camera_mode()

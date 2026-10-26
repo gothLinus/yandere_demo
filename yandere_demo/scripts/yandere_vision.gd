@@ -12,7 +12,7 @@ const YANDERE_ITEMS_GROUP: StringName = &"yandere_items"
 const SCREEN_LAYER: int = 10
 
 var target: TargetAI
-var observation_tracker: ObservationTracker
+var observation_tracker: ObservationTracker = ObservationTracker.new()
 
 var _is_active: bool = false
 var _was_key_held: bool = false
@@ -25,6 +25,11 @@ var _previous_overlays: Dictionary = {}
 @onready var _vision_screen: ColorRect = ColorRect.new()
 
 
+func _init() -> void:
+	observation_tracker.name = "ObservationTracker"
+	add_child(observation_tracker)
+
+
 func _ready() -> void:
 	_xray_material.shader = XRAY_SHADER
 	_screen_layer.layer = SCREEN_LAYER
@@ -35,9 +40,6 @@ func _ready() -> void:
 	_vision_screen.visible = false
 	_screen_layer.add_child(_vision_screen)
 	add_child(_screen_layer)
-	observation_tracker = ObservationTracker.new()
-	observation_tracker.name = "ObservationTracker"
-	add_child(observation_tracker)
 
 
 func _process(_delta: float) -> void:
@@ -48,8 +50,13 @@ func _process(_delta: float) -> void:
 
 
 func bind(new_target: TargetAI, new_meters: StealthMeters, new_day_run: DayRun, new_banked_intel: Array[StringName]) -> void:
+	var was_active: bool = _is_active
+	if was_active:
+		_restore_overlays()
 	target = new_target
-	observation_tracker.bind(_player, new_target, new_meters, new_day_run, new_banked_intel)
+	if was_active:
+		_apply_overlays()
+	observation_tracker.bind(get_parent() as StealthPlayer, new_target, new_meters, new_day_run, new_banked_intel)
 
 
 func set_vision(active: bool) -> void:

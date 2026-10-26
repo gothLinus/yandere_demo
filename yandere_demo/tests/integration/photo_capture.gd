@@ -69,7 +69,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _run_scenario() -> String:
-	for step: Callable in [_clear_shot, _blocked_shot, _flash_spike, _rare_activity_intel, _observed_activity_intel, _vision_overlay]:
+	for step: Callable in [_clear_shot, _blocked_shot, _flash_spike, _rare_activity_intel, _observed_activity_intel, _rebind_after_target_freed, _vision_overlay, _vision_rebind]:
 		var failure: String = await step.call()
 		if not failure.is_empty():
 			return failure
@@ -159,12 +159,17 @@ func _vision_overlay() -> String:
 	var toggles: Array[bool] = []
 	_yandere_vision.vision_toggled.connect(func(active: bool) -> void: toggles.append(active))
 	_yandere_vision.set_vision(true)
+	for frame: int in AIM_SETTLE_FRAMES:
+		await get_tree().physics_frame
 	if not _player.is_vision_active:
-		return "vision did not set is_vision_active"
+		return "is_vision_active was cleared again after set_vision(true)"
 	for node: Node in meshes:
 		if (node as MeshInstance3D).material_overlay == null:
 			return "%s got no vision overlay" % node.name
 	_yandere_vision.set_vision(false)
+	await get_tree().physics_frame
+	if _player.is_vision_active:
+		return "is_vision_active stayed set after set_vision(false)"
 	for index: int in meshes.size():
 		if (meshes[index] as MeshInstance3D).material_overlay != overlays_before[index]:
 			return "%s overlay was not restored" % meshes[index].name
@@ -173,6 +178,48 @@ func _vision_overlay() -> String:
 	if toggles != [true, false]:
 		return "vision_toggled gave %s" % [toggles]
 	return ""
+
+
+func _rebind_after_target_freed() -> String:
+	var old_target: TargetAI = (load(TARGET_SCENE_PATH) as PackedScene).instantiate() as TargetAI
+	add_child(old_target)
+	await get_tree().process_frame
+	var banked: Array[StringName] = []
+	_yandere_vision.bind(old_target, _meters, _day_run, banked)
+	old_target.free()
+	_yandere_vision.bind(_target, _meters, _day_run, banked)
+	var tracker: ObservationTracker = _yandere_vision.observation_tracker
+	var activity: ActivityDefinition = (load(POOL_PATH) as ActivityPool).find(ROOFTOP_ID)
+	_day_run.intel.erase(ROOFTOP_CARD)
+	_target.activity_started.emit(activity)
+	await _wait_seconds(WATCH_SECONDS)
+	_target.activity_completed.emit(activity)
+	if not _day_run.intel.has(ROOFTOP_CARD):
+		return "tracking did not work on the new target after rebinding"
+	if tracker.watched_seconds <= 0.0:
+		return "no watched seconds on the new target"
+	return ""
+
+
+func _vision_rebind() -> String:
+	var other: TargetAI = (load(TARGET_SCENE_PATH) as PackedScene).instantiate() as TargetAI
+	add_child(other)
+	await get_tree().process_frame
+	var banked: Array[StringName] = []
+	var old_meshes: Array[Node] = _target.find_children("*", "MeshInstance3D", true, false)
+	var new_meshes: Array[Node] = other.find_children("*", "MeshInstance3D", true, false)
+	var old_overlay: Material = (old_meshes[0] as MeshInstance3D).material_overlay
+	_yandere_vision.set_vision(true)
+	_yandere_vision.bind(other, _meters, _day_run, banked)
+	var failure: String = ""
+	if (old_meshes[0] as MeshInstance3D).material_overlay != old_overlay:
+		failure = "the old target kept the overlay after rebind"
+	elif (new_meshes[0] as MeshInstance3D).material_overlay == null:
+		failure = "the new target got no overlay while vision was active"
+	_yandere_vision.set_vision(false)
+	_yandere_vision.bind(_target, _meters, _day_run, banked)
+	other.free()
+	return failure
 
 
 func _start_activity(activity_id: StringName) -> String:
