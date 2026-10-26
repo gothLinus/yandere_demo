@@ -77,6 +77,8 @@ var _planned: PlannedActivity
 var _destination_activity: ActivityDefinition
 var _destination: Node3D
 var _lingering: bool = false
+## True only while the planned activity is being performed, from its start until it completes.
+var _performing: bool = false
 var _seated: bool = false
 var _minutes_left: float = 0.0
 var _last_clock_minute: float = 0.0
@@ -183,6 +185,7 @@ func setup(school_env: SchoolEnv, day_seed: int, history: ActivityHistory) -> vo
 	_model.visible = true
 	_set_seated(false)
 	_planned = null
+	_performing = false
 	_destination = null
 	_end_head_turn()
 	_set_state(State.ACTIVITY)
@@ -222,6 +225,7 @@ func start_plan(new_plan: Array[PlannedActivity]) -> void:
 	plan = new_plan
 	_plan_index = -1
 	_lingering = false
+	_performing = false
 	_end_head_turn()
 	if state == State.LEAVING:
 		_after_leaving = _start_next.bind(false)
@@ -250,6 +254,7 @@ func snap_to_class_seat() -> void:
 		_planned = null
 		_lingering = true
 	_set_state(State.ACTIVITY)
+	_performing = seat_planned
 	if starts_now:
 		_lingering = false
 		_start_activity_timer()
@@ -271,12 +276,18 @@ func eye_forward() -> Vector3:
 	return (_head_transform().basis * Vector3.BACK).normalized()
 
 
+## The activity he is performing right now, or null while he travels, enters, leaves or idles.
 func current_activity() -> ActivityDefinition:
+	return _planned.activity if _performing else null
+
+
+## The planned activity he is heading for or performing, or null while he idles.
+func planned_destination() -> ActivityDefinition:
 	return _planned.activity if _planned != null else null
 
 
 func elapsed_activity_fraction() -> float:
-	if _planned == null or _planned.duration_minutes <= 0.0:
+	if not _performing or _planned.duration_minutes <= 0.0:
 		return 0.0
 	return clampf(1.0 - _minutes_left / _planned.duration_minutes, 0.0, 1.0)
 
@@ -300,7 +311,7 @@ func calm_down() -> void:
 	if state != State.NOTICE and state != State.SUSPICIOUS:
 		return
 	_end_head_turn()
-	_expression.set_expression(_planned.activity.expression if _resumes_activity() else EXPRESSION_NEUTRAL)
+	_expression.set_expression(_planned.activity.expression if _performing else EXPRESSION_NEUTRAL)
 	_set_state(_resume_state)
 	_play(_resume_animation)
 	_reset_progress()
@@ -316,12 +327,14 @@ func activity_minutes_elapsed(game_minutes_delta: float) -> void:
 
 
 func _start_next(after_skip: bool) -> void:
+	var skipped: bool = after_skip
 	_plan_index += 1
 	while _plan_index < plan.size():
 		if _begin_planned(plan[_plan_index]):
 			return
+		skipped = true
 		_plan_index += 1
-	if after_skip and not plan.is_empty():
+	if skipped and not plan.is_empty():
 		_begin_fallback()
 	else:
 		_stop_in_place()
@@ -357,6 +370,7 @@ func _begin_fallback() -> void:
 
 
 func _begin_travel() -> bool:
+	_performing = false
 	_agent.target_position = _destination.global_position
 	_agent.get_next_path_position()
 	var path: PackedVector3Array = _agent.get_current_navigation_path()
@@ -382,6 +396,7 @@ func _on_unreachable() -> void:
 
 func _stop_in_place() -> void:
 	_planned = null
+	_performing = false
 	_destination = null
 	_lingering = true
 	_set_state(State.ACTIVITY)
@@ -391,6 +406,7 @@ func _stop_in_place() -> void:
 
 func _complete_activity() -> void:
 	var finished: PlannedActivity = _planned
+	_performing = false
 	activity_completed.emit(finished.activity)
 	_maybe_drop_item(finished)
 	_begin_leaving(_start_next.bind(false))
@@ -404,10 +420,6 @@ func _is_planned_at(seat: Node3D) -> bool:
 		and anchors[_planned.anchor_index].global_position.distance_to(seat.global_position) < SAME_SPOT_DISTANCE
 
 
-func _resumes_activity() -> bool:
-	return _planned != null and not _lingering and _resume_state == State.ACTIVITY
-
-
 func _record_history(activity: ActivityDefinition) -> void:
 	if _history != null:
 		_history.record(_block.id if _block != null else &"", activity.id)
@@ -416,7 +428,7 @@ func _record_history(activity: ActivityDefinition) -> void:
 func _step_travel(delta: float) -> void:
 	var distance: float = global_position.distance_to(_destination.global_position)
 	if _has_arrived(distance):
-		_on_arrived()
+		_begin_entering()
 		return
 	# The agent finishes up to target_desired_distance short of the path end; walk the rest before judging the anchor.
 	var at_path_end: bool = _agent.is_navigation_finished() \
@@ -436,14 +448,6 @@ func _step_travel(delta: float) -> void:
 func _has_arrived(distance: float) -> bool:
 	return distance <= tuning.entering_distance \
 		or (_agent.is_navigation_finished() and distance <= tuning.seated_entering_distance)
-
-
-func _on_arrived() -> void:
-	if not _lingering and _destination_activity.id == GO_HOME:
-		activity_started.emit(_destination_activity)
-		_go_home()
-		return
-	_begin_entering()
 
 
 ## Speed eases toward `wanted`; the walking direction turns toward the path at the capped turn rate, so corners are
@@ -644,8 +648,12 @@ func _begin_activity() -> void:
 		_play(_destination_activity.animation if _seated else _random_idle())
 		return
 	_start_activity_timer()
+	_performing = true
 	_expression.set_expression(_planned.activity.expression)
 	activity_started.emit(_planned.activity)
+	if _planned.activity.id == GO_HOME:
+		_go_home()
+		return
 	if _planned.activity.id == COURTYARD_STROLL:
 		_begin_stroll()
 		return
@@ -729,6 +737,7 @@ func _step_leaving(delta: float) -> void:
 
 
 func _go_home() -> void:
+	_performing = false
 	_set_state(State.GONE)
 	_model.visible = false
 	_body_shape.set_enabled(false)

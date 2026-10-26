@@ -1,7 +1,8 @@
 extends IntegrationTest
 ## Runs the target through the whole before_school block at 8x and checks that his motion stays seamless: no
 ## teleports, no snapping turns, and every activity starting on its anchor with its expression. Then, at 1x, the
-## class-fade snap into his seat and a notice that turns his head toward a point and back.
+## class-fade snap into his seat, a notice that turns his head toward a point and back, and going home through the
+## Gate.
 
 const SCHOOL_ENV_PATH: String = "res://scenes/school_env.tscn"
 const TARGET_SCENE_PATH: String = "res://scenes/target.tscn"
@@ -19,6 +20,11 @@ const LOOK_SETTLE_SECONDS: float = 0.6
 const NOTICE_OFFSET: Vector3 = Vector3(3.0, 0.0, 0.0)
 const MIN_FACING_DOT: float = 0.5
 const MIN_LOOK_DOT: float = 0.8
+const GO_HOME_DEADLINE_SECONDS: float = 15.0
+const POOL_PATH: String = "res://data/activity_pool.tres"
+const NOT_YET_PERFORMING: Array[TargetAI.State] = [
+	TargetAI.State.TRAVEL, TargetAI.State.ARRIVING, TargetAI.State.MICRO_STOP, TargetAI.State.ENTERING,
+]
 
 var _school_env: SchoolEnv
 var _target: TargetAI
@@ -75,6 +81,11 @@ func _check_motion(delta: float) -> void:
 		yaw_limit = PI * delta / _entering_seconds + YAW_TOLERANCE
 	if yaw_change > yaw_limit:
 		_fail_once("yaw changed %.3f rad in one frame (limit %.3f) in state %s" % [yaw_change, yaw_limit, _state_name()])
+	if NOT_YET_PERFORMING.has(_target.state):
+		if _target.current_activity() != null or _target.elapsed_activity_fraction() != 0.0:
+			_fail_once("before its start, %s reads as performed (fraction %.2f) in state %s" % [
+					_target.current_activity().id if _target.current_activity() != null else &"-",
+					_target.elapsed_activity_fraction(), _state_name()])
 	_previous_position = position
 	_previous_yaw = _target.rotation.y
 
@@ -84,7 +95,7 @@ func _on_state_changed(state: TargetAI.State) -> void:
 		return
 	# The ENTERING tween runs max(0.4 s, distance / 1.2 m/s) toward the nearest anchor of his activity (ruling R12).
 	var distance: float = 0.0
-	var activity: ActivityDefinition = _target.current_activity()
+	var activity: ActivityDefinition = _target.planned_destination()
 	if activity != null:
 		distance = INF
 		for anchor: Node3D in _school_env.anchors_for(activity.id):
@@ -94,6 +105,8 @@ func _on_state_changed(state: TargetAI.State) -> void:
 
 func _on_activity_started(activity: ActivityDefinition) -> void:
 	_started_ids.append(activity.id)
+	if _target.current_activity() != activity:
+		_fail_once("%s started but current_activity() is %s" % [activity.id, _target.current_activity()])
 	var nearest: float = INF
 	for planned: PlannedActivity in _target.plan:
 		if planned.activity.id != activity.id:
@@ -121,6 +134,7 @@ func _on_block_changed(block: ScheduleBlock) -> void:
 	Engine.time_scale = _previous_time_scale
 	Engine.max_physics_steps_per_frame = _previous_max_steps
 	await _check_class_seat_and_notice()
+	await _check_go_home()
 	_finish()
 
 
@@ -148,6 +162,22 @@ func _check_class_seat_and_notice() -> void:
 	await get_tree().create_timer(LOOK_SETTLE_SECONDS).timeout
 	if _target.state != TargetAI.State.ACTIVITY or _target.eye_forward().dot(body_forward) < MIN_FACING_DOT:
 		_failures.append("calm_down did not resume (state %s)" % _state_name())
+
+
+func _check_go_home() -> void:
+	var go_home: PlannedActivity = PlannedActivity.new()
+	go_home.activity = (load(POOL_PATH) as ActivityPool).find(&"go_home")
+	_target.global_position = _school_env.marker("TargetSpawn").global_position
+	await get_tree().physics_frame
+	_target.start_plan([go_home] as Array[PlannedActivity])
+	var seconds: float = 0.0
+	while _target.state != TargetAI.State.GONE and seconds <= GO_HOME_DEADLINE_SECONDS:
+		await get_tree().physics_frame
+		seconds += get_physics_process_delta_time()
+	if _target.state != TargetAI.State.GONE or _started_ids[-1] != &"go_home":
+		_failures.append("go_home did not end GONE (state %s, started %s)" % [_state_name(), _started_ids])
+	elif (_target.get_node("Model") as Node3D).visible:
+		_failures.append("the model stays visible after going home")
 
 
 func _fail_once(message: String) -> void:

@@ -1,6 +1,7 @@
 extends IntegrationTest
-## A planned anchor sealed inside a solid box: the target walks into the box, stalls, skips that activity and starts
-## the next one within 12 s.
+## A planned anchor sealed inside a solid box: the target walks into the box, stalls and skips that activity.
+## With a next activity he starts it within 12 s. With nothing left he goes to Anchor_<first activity>_00 and waits
+## there without starting it.
 
 const SCHOOL_ENV_PATH: String = "res://scenes/school_env.tscn"
 const TARGET_SCENE_PATH: String = "res://scenes/target.tscn"
@@ -10,53 +11,89 @@ const NEXT_ACTIVITY: StringName = &"chat_students"
 const BOX_OFFSET: Vector3 = Vector3(3.0, 0.0, 0.0)
 const BOX_SIZE: Vector3 = Vector3(2.0, 2.0, 2.0)
 const START_OFFSET: Vector3 = Vector3(1.0, 0.0, 0.0)
-const DEADLINE_SECONDS: float = 12.0
+const NEXT_DEADLINE_SECONDS: float = 12.0
+const FALLBACK_DEADLINE_SECONDS: float = 16.0
+const ANCHOR_TOLERANCE: float = 0.35
 const PLANNED_MINUTES: float = 5.0
 
+var _school_env: SchoolEnv
+var _target: TargetAI
+var _pool: ActivityPool
 var _started_ids: Array[StringName] = []
-var _plan_seconds: float = 0.0
-var _running: bool = false
 
 
 func _ready() -> void:
-	timeout_seconds = 60.0
-	var school_env: SchoolEnv = (load(SCHOOL_ENV_PATH) as PackedScene).instantiate() as SchoolEnv
-	add_child(school_env)
-	await school_env.navigation_ready
-	var next_anchor: Node3D = school_env.anchors_for(NEXT_ACTIVITY)[0]
-	var sealed_anchor: Node3D = school_env.anchors_for(SEALED_ACTIVITY)[0]
+	timeout_seconds = 90.0
+	_school_env = (load(SCHOOL_ENV_PATH) as PackedScene).instantiate() as SchoolEnv
+	add_child(_school_env)
+	await _school_env.navigation_ready
+	_pool = load(POOL_PATH) as ActivityPool
+	_target = (load(TARGET_SCENE_PATH) as PackedScene).instantiate() as TargetAI
+	add_child(_target)
+	_target.activity_started.connect(func(activity: ActivityDefinition) -> void: _started_ids.append(activity.id))
+	_target.setup(_school_env, 1, ActivityHistory.new())
+	var failure: String = await _skips_to_next_activity()
+	if failure.is_empty():
+		failure = await _falls_back_when_nothing_is_left()
+	if failure.is_empty():
+		pass_test()
+	else:
+		fail_test(failure)
+
+
+func _skips_to_next_activity() -> String:
+	var next_anchor: Node3D = _school_env.anchors_for(NEXT_ACTIVITY)[0]
+	var sealed_anchor: Node3D = _school_env.anchors_for(SEALED_ACTIVITY)[0]
 	sealed_anchor.global_position = next_anchor.global_position + BOX_OFFSET
 	_add_sealed_box(sealed_anchor.global_position)
-	var target: TargetAI = (load(TARGET_SCENE_PATH) as PackedScene).instantiate() as TargetAI
-	add_child(target)
-	target.activity_started.connect(func(activity: ActivityDefinition) -> void: _started_ids.append(activity.id))
-	target.setup(school_env, 1, ActivityHistory.new())
-	target.global_position = next_anchor.global_position + START_OFFSET
+	await _start([_planned(SEALED_ACTIVITY, 0), _planned(NEXT_ACTIVITY, 0)], next_anchor.global_position + START_OFFSET)
+	var seconds: float = await _wait_until(func() -> bool: return not _started_ids.is_empty(), NEXT_DEADLINE_SECONDS)
+	if _started_ids.size() != 1 or _started_ids[0] != NEXT_ACTIVITY:
+		return "expected only %s to start within %.0f s, started %s" % [NEXT_ACTIVITY, NEXT_DEADLINE_SECONDS, _started_ids]
+	print("%s started after %.1f s" % [NEXT_ACTIVITY, seconds])
+	return ""
+
+
+func _falls_back_when_nothing_is_left() -> String:
+	_started_ids.clear()
+	var fallback_anchor: Node3D = _school_env.anchors_for(SEALED_ACTIVITY)[0]
+	fallback_anchor.global_position = _school_env.anchors_for(NEXT_ACTIVITY)[0].global_position
+	# The first scenario's box is still there, east of this spot.
+	var sealed_anchor: Node3D = _school_env.anchors_for(SEALED_ACTIVITY)[1]
+	sealed_anchor.global_position = fallback_anchor.global_position + BOX_OFFSET
+	await _start([_planned(SEALED_ACTIVITY, 1)], fallback_anchor.global_position + START_OFFSET)
+	var waiting_at_fallback: Callable = func() -> bool:
+		return _target.state == TargetAI.State.ACTIVITY \
+			and _target.global_position.distance_to(fallback_anchor.global_position) <= ANCHOR_TOLERANCE
+	var seconds: float = await _wait_until(waiting_at_fallback, FALLBACK_DEADLINE_SECONDS)
+	if not waiting_at_fallback.call():
+		return "did not reach Anchor_%s_00 within %.0f s (state %s, %.2f m away)" % [SEALED_ACTIVITY, FALLBACK_DEADLINE_SECONDS,
+				TargetAI.State.keys()[_target.state], _target.global_position.distance_to(fallback_anchor.global_position)]
+	if not _started_ids.is_empty() or _target.current_activity() != null:
+		return "the fallback started an activity: %s" % [_started_ids]
+	print("waiting at Anchor_%s_00 after %.1f s" % [SEALED_ACTIVITY, seconds])
+	return ""
+
+
+func _start(plan: Array[PlannedActivity], at: Vector3) -> void:
+	_target.global_position = at
 	await get_tree().physics_frame
-	var pool: ActivityPool = load(POOL_PATH) as ActivityPool
-	target.start_plan([_planned(pool.find(SEALED_ACTIVITY)), _planned(pool.find(NEXT_ACTIVITY))] as Array[PlannedActivity])
-	_running = true
+	_target.start_plan(plan)
 
 
-func _physics_process(delta: float) -> void:
-	if not _running:
-		return
-	_plan_seconds += delta
-	if _started_ids.has(SEALED_ACTIVITY):
-		_running = false
-		fail_test("the sealed activity started")
-	elif _started_ids.has(NEXT_ACTIVITY):
-		_running = false
-		print("%s started after %.1f s" % [NEXT_ACTIVITY, _plan_seconds])
-		pass_test()
-	elif _plan_seconds > DEADLINE_SECONDS:
-		_running = false
-		fail_test("%s did not start within %.0f s (started %s)" % [NEXT_ACTIVITY, DEADLINE_SECONDS, _started_ids])
+## Waits physics frames until `condition` holds or `limit` seconds pass; returns the seconds waited.
+func _wait_until(condition: Callable, limit: float) -> float:
+	var seconds: float = 0.0
+	while not condition.call() and seconds <= limit:
+		await get_tree().physics_frame
+		seconds += get_physics_process_delta_time()
+	return seconds
 
 
-func _planned(activity: ActivityDefinition) -> PlannedActivity:
+func _planned(activity_id: StringName, anchor_index: int) -> PlannedActivity:
 	var planned: PlannedActivity = PlannedActivity.new()
-	planned.activity = activity
+	planned.activity = _pool.find(activity_id)
+	planned.anchor_index = anchor_index
 	planned.duration_minutes = PLANNED_MINUTES
 	return planned
 
