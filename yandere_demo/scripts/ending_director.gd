@@ -43,6 +43,10 @@ const CHERRY_PUSH_IN_DISTANCE: float = 2.0
 const CHERRY_FIELD_OF_VIEW: float = 45.0
 const FRIENDS_FIELD_OF_VIEW: float = 70.0
 const STRANGER_FIELD_OF_VIEW: float = 50.0
+const STRANGER_CAMERA_HEIGHT: float = 1.6
+const STRANGER_LOOK_HEIGHT: float = 1.0
+## Room kept beside his pass, as a factor on its half length.
+const STRANGER_FRAME_MARGIN: float = 1.25
 const SHRINE_FIELD_OF_VIEW: float = 60.0
 const PETAL_HEIGHT: float = 3.5
 const PETAL_AMOUNT: int = 120
@@ -161,10 +165,52 @@ func _play_stranger() -> void:
 	var walked_length: float = minf(_path_length(path), WALK_SPEED * SEQUENCE_SECONDS)
 	_target.get_node(^"AnimationTree").set(TargetAI.LOCOMOTION_BLEND_PARAMETER, 1.0)
 	_target_playback.travel(STATE_LOCOMOTION)
+	_place_stranger_camera(path, walked_length)
 	_walk_path = path
 	_walk_length = walked_length
 	_walk_distance = 0.0
 	await _wait(SEQUENCE_SECONDS)
+
+
+## Ruling R31: the EndingCamera_stranger marker sits on his path, so he walked out of frame within 3 s. The camera
+## stands static to the side of the stretch he walks, far enough back to hold all of it and the player. A side
+## whose view of the pass is blocked by the school is skipped; with neither clear the marker stays.
+func _place_stranger_camera(path: PackedVector3Array, walked_length: float) -> void:
+	var start: Vector3 = path[0]
+	var end: Vector3 = _point_along(path, walked_length)
+	var center: Vector3 = (start + end) * 0.5
+	var along: Vector3 = Vector3(end.x - start.x, 0.0, end.z - start.z)
+	var half_width: float = maxf(along.length() * 0.5, center.distance_to(_player.global_position)) * STRANGER_FRAME_MARGIN
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var aspect: float = viewport_size.x / maxf(viewport_size.y, 1.0)
+	var half_horizontal_tangent: float = tan(deg_to_rad(STRANGER_FIELD_OF_VIEW) * 0.5) * aspect
+	var distance: float = half_width / half_horizontal_tangent
+	var side: Vector3 = along.normalized().cross(Vector3.UP)
+	var look_point: Vector3 = center + Vector3.UP * STRANGER_LOOK_HEIGHT
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	for direction: Vector3 in [side, -side]:
+		var candidate: Vector3 = center + direction * distance
+		candidate.y = center.y + STRANGER_CAMERA_HEIGHT
+		var is_clear: bool = true
+		for watched: Vector3 in [start, end, _player.global_position]:
+			var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+				candidate, watched + Vector3.UP * STRANGER_LOOK_HEIGHT, PhysicsLayers.WORLD)
+			is_clear = is_clear and space.intersect_ray(query).is_empty()
+		if is_clear:
+			_camera.global_position = candidate
+			_camera.look_at(look_point)
+			return
+	push_warning("EndingDirector: no clear side view of the stranger's walk; using the EndingCamera_stranger marker")
+
+
+func _point_along(path: PackedVector3Array, distance: float) -> Vector3:
+	var remaining: float = distance
+	for index: int in range(1, path.size()):
+		var segment_length: float = path[index - 1].distance_to(path[index])
+		if remaining <= segment_length:
+			return path[index - 1].lerp(path[index], remaining / maxf(segment_length, 0.0001))
+		remaining -= segment_length
+	return path[path.size() - 1]
 
 
 func _play_shrine() -> void:

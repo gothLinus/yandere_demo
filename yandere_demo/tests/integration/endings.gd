@@ -14,6 +14,9 @@ const PASS_DISTANCE: float = 3.0
 const MAXIMUM_WALK_SPEED: float = 1.5
 const MINIMUM_SEQUENCE_SECONDS: float = 10.0
 const MAXIMUM_SEQUENCE_SECONDS: float = 15.0
+## Ruling R31: the stranger's static camera keeps his head in frame for most of the walk, and the player too.
+const MINIMUM_FRAMED_WALK_FRACTION: float = 0.8
+const PLAYER_HEAD_HEIGHT: float = 1.5
 const BANKED_PHOTO_COUNT: int = 3
 const TITLES: Dictionary = {
 	&"cherry_tree": "Under the Cherry Tree",
@@ -34,6 +37,10 @@ var _fastest_speed: float = 0.0
 var _closest_distance: float = INF
 var _final_distance: float = 0.0
 var _max_look_influence: float = 0.0
+var _walking_frames: int = 0
+var _framed_walking_frames: int = 0
+var _player_framed_frames: int = 0
+var _observed_camera: Camera3D
 
 
 func _ready() -> void:
@@ -72,6 +79,12 @@ func _sample(delta: float) -> void:
 	_closest_distance = minf(_closest_distance, _final_distance)
 	var look_at: LookAtModifier3D = _observed_target.get_node(^"Model/TargetChar/Skeleton3D/LookAtModifier3D")
 	_max_look_influence = maxf(_max_look_influence, look_at.influence)
+	if step > 0.0:
+		_walking_frames += 1
+		if _observed_camera.is_position_in_frustum(_observed_target.head_position()):
+			_framed_walking_frames += 1
+		if _observed_camera.is_position_in_frustum(_observed_player.global_position + Vector3.UP * PLAYER_HEAD_HEIGHT):
+			_player_framed_frames += 1
 
 
 func _exit_tree() -> void:
@@ -136,6 +149,10 @@ func _begin_observing(director: EndingDirector) -> void:
 	_fastest_speed = 0.0
 	_closest_distance = INF
 	_max_look_influence = 0.0
+	_walking_frames = 0
+	_framed_walking_frames = 0
+	_player_framed_frames = 0
+	_observed_camera = director.get_node("%EndingCamera")
 	_observed_player = director.get_node("%Player")
 	_last_position = director.get_node("%Target").global_position
 	_observed_target = director.get_node("%Target")
@@ -169,4 +186,9 @@ func _verify(director: EndingDirector, ending_id: StringName) -> String:
 			return "he did not pass the player (closest %.1f m, final %.1f m)" % [_closest_distance, _final_distance]
 		if _max_look_influence > 0.0:
 			return "his LookAt influence rose to %.2f" % _max_look_influence
+		var framed_fraction: float = float(_framed_walking_frames) / maxi(_walking_frames, 1)
+		if framed_fraction < MINIMUM_FRAMED_WALK_FRACTION:
+			return "his head was in frame for only %.0f%% of the walk" % (framed_fraction * 100.0)
+		if _player_framed_frames < _walking_frames:
+			return "the player left the frame during the walk (%d of %d frames)" % [_player_framed_frames, _walking_frames]
 	return ""
