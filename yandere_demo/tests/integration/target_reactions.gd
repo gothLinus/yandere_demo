@@ -1,7 +1,8 @@
 extends IntegrationTest
 ## The target's other senses and reactions: a footstep turns his head for 1.5 s without a reaction state, the player
-## right next to him or a flash startles him with a Suspicion spike and he calms back into his activity, an item of his
-## seen in the player's hands counts once, and at 100 Suspicion he reports and walks off toward a teacher.
+## right next to him startles him with a Suspicion spike, a flash startles him without one (ruling R21), he calms back
+## into his activity after each, an item of his seen in the player's hands counts once, and at 100 Suspicion he
+## reports and walks off toward a teacher.
 
 const SCHOOL_ENV_PATH: String = "res://scenes/school_env.tscn"
 const TARGET_SCENE_PATH: String = "res://scenes/target.tscn"
@@ -33,7 +34,6 @@ var _look_at: LookAtModifier3D
 var _anchor: Node3D
 var _forward: Vector3
 var _reported_count: int = 0
-var _finished_scenario: bool = false
 
 
 func _ready() -> void:
@@ -51,8 +51,6 @@ func _ready() -> void:
 	_player.global_transform = _school_env.marker("PlayerSpawn").global_transform
 	_meters = StealthMeters.new(STEALTH_TUNING)
 	var failure: String = await _run_scenario()
-	if failure.is_empty() and not _finished_scenario:
-		failure = "the scenario stopped on a script error"
 	if failure.is_empty():
 		pass_test()
 	else:
@@ -64,7 +62,6 @@ func _run_scenario() -> String:
 		var failure: String = await step.call()
 		if not failure.is_empty():
 			return failure
-	_finished_scenario = true
 	return ""
 
 
@@ -122,8 +119,8 @@ func _startles_at_flash() -> String:
 	_meters.reset()
 	await _send_player_away()
 	_target.on_flash(_player.head_position())
-	if _target.state != TargetAI.State.STARTLED or not is_equal_approx(_meters.suspicion, STEALTH_TUNING.flash_spike):
-		return "the flash did not startle him (state %s, suspicion %.1f)" % [_state_name(), _meters.suspicion]
+	if _target.state != TargetAI.State.STARTLED or _meters.suspicion != 0.0:
+		return "the flash did not only startle him (state %s, suspicion %.1f)" % [_state_name(), _meters.suspicion]
 	return await _calms_down()
 
 

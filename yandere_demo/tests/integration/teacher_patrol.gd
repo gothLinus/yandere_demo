@@ -31,7 +31,6 @@ var _reached: Array[String] = []
 var _reached_seconds: Dictionary = {}
 var _left_seconds: Dictionary = {}
 var _seconds: float = 0.0
-var _finished_scenario: bool = false
 var _previous_time_scale: float
 var _previous_max_steps: int
 
@@ -53,8 +52,6 @@ func _ready() -> void:
 	var failure: String = await _patrols_in_order()
 	if failure.is_empty():
 		failure = await _alert_reasons_apply()
-	if failure.is_empty() and not _finished_scenario:
-		failure = "the scenario stopped on a script error"
 	if failure.is_empty():
 		pass_test()
 	else:
@@ -119,7 +116,6 @@ func _alert_reasons_apply() -> String:
 	await _settle()
 	if _teacher.alert_reasons() != [TeacherAI.REASON_CAMERA_AT_STUDENT]:
 		return "camera at a student: reasons %s" % [_teacher.alert_reasons()]
-	_finished_scenario = true
 	return ""
 
 

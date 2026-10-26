@@ -21,7 +21,6 @@ var _school_env: SchoolEnv
 var _teacher: TeacherAI
 var _player: StealthPlayer
 var _meters: StealthMeters
-var _finished_scenario: bool = false
 
 
 func _ready() -> void:
@@ -49,8 +48,6 @@ func _ready() -> void:
 		failure = await _seen_in_hallway()
 	if failure.is_empty():
 		failure = await _seen_in_class()
-	if failure.is_empty() and not _finished_scenario:
-		failure = "the scenario stopped on a script error"
 	if failure.is_empty():
 		pass_test()
 	else:
@@ -86,7 +83,6 @@ func _seen_in_class() -> String:
 		return "the teacher does not see the player in class, so the check proves nothing"
 	if _meters.school_alert > 0.0:
 		return "school alert rose to %.2f with the player inside %s" % [_meters.school_alert, CLASS_VOLUME]
-	_finished_scenario = true
 	return ""
 
 

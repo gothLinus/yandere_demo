@@ -365,9 +365,10 @@ func report() -> void:
 	reported.emit()
 
 
-## Flash hook for photo mode (Task 17): call it when he is in the camera's view as the flash fires.
+## Flash reaction for photo mode (ruling R21): he only startles. Photo mode checks `perception.can_see` first and
+## owns the `flash_spike`.
 func on_flash(flash_position: Vector3) -> void:
-	perception.on_flash(flash_position)
+	startle(flash_position)
 
 
 ## Turns his head toward `point` (LookAtModifier influence to 1 over `head_turn_seconds`).

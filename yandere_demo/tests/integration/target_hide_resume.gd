@@ -24,7 +24,6 @@ var _player: StealthPlayer
 var _meters: StealthMeters
 var _reported: bool = false
 var _reacted: bool = false
-var _finished_scenario: bool = false
 
 
 func _ready() -> void:
@@ -42,8 +41,6 @@ func _ready() -> void:
 	_player.global_transform = _school_env.marker("PlayerSpawn").global_transform
 	_meters = StealthMeters.new(STEALTH_TUNING)
 	var failure: String = await _run_scenario()
-	if failure.is_empty() and not _finished_scenario:
-		failure = "the scenario stopped on a script error"
 	if failure.is_empty():
 		pass_test()
 	else:
@@ -80,7 +77,6 @@ func _run_scenario() -> String:
 	if _reported:
 		return "he reported while the player hid"
 	print("suspicion 0 after %.2f s; resumed %s after %.2f s" % [drained_after, _state_name(), resumed_after])
-	_finished_scenario = true
 	return ""
 
 

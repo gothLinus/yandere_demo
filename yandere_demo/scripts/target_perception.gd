@@ -61,19 +61,13 @@ func reset() -> void:
 	_spiked_item_ids.clear()
 
 
-## Sight cone from his eyes along where his face looks, then a ray that only geometry blocks (ruling R15).
+## Sight cone from his eyes along where his face looks, then a ray that only geometry blocks (ruling R15). Photo
+## mode (Task 17) uses it for "the flash fired while he can see it" (ruling R21).
 func can_see(point: Vector3) -> bool:
 	var eye: Vector3 = _target.head_position()
 	if not Detection.is_in_view_cone(eye, _target.eye_forward(), point, tuning.sight_fov_degrees, tuning.sight_range):
 		return false
 	return Detection.has_line_of_sight(_target.get_world_3d().direct_space_state, eye, point, [])
-
-
-func on_flash(flash_position: Vector3) -> void:
-	if meters == null or not _is_aware():
-		return
-	_target.startle(flash_position)
-	meters.add_suspicion_spike(tuning.flash_spike)
 
 
 func _is_aware() -> bool:

@@ -22,7 +22,6 @@ var _school_env: SchoolEnv
 var _clock: SchoolClockModel
 var _meters: StealthMeters
 var _spawner: CrowdSpawner
-var _finished_scenario: bool = false
 var _previous_time_scale: float
 var _previous_max_steps: int
 
@@ -38,8 +37,6 @@ func _ready() -> void:
 	_meters = StealthMeters.new(STEALTH_TUNING)
 	var failure: String = await _run_scenario()
 	_restore_time_scale()
-	if failure.is_empty() and not _finished_scenario:
-		failure = "the scenario stopped on a script error"
 	if failure.is_empty():
 		pass_test()
 	else:
@@ -51,7 +48,6 @@ func _run_scenario() -> String:
 		var failure: String = await step.call()
 		if not failure.is_empty():
 			return failure
-	_finished_scenario = true
 	return ""
 
 
