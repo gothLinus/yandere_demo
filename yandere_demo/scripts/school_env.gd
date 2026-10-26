@@ -6,6 +6,10 @@ signal navigation_ready()
 const MAX_SYNC_FRAMES: int = 300
 const MAP_SYNC_TOLERANCE: float = 0.5
 const VOLUME_HALF_EXTENT_LIMIT: float = 1.0
+const HIDE_LOCKER_SCENE: PackedScene = preload("res://scenes/props/hide_locker.tscn")
+const HIDE_DESK_SCENE: PackedScene = preload("res://scenes/props/hide_desk.tscn")
+const CLASS_SEAT_SCENE: PackedScene = preload("res://scenes/props/class_seat.tscn")
+const STASH_LOCKER_SCENE: PackedScene = preload("res://scenes/props/stash_locker.tscn")
 
 @export var daylight_profile: DaylightProfile = preload("res://data/daylight_profile.tres")
 
@@ -19,6 +23,7 @@ var _markers: Dictionary = {}
 func _ready() -> void:
 	_school.reparent(_navigation_region, false)
 	_index_markers()
+	_spawn_interactables()
 	var navigation_mesh: NavigationMesh = _navigation_region.navigation_mesh
 	var map: RID = _navigation_region.get_navigation_map()
 	NavigationServer3D.map_set_cell_size(map, navigation_mesh.cell_size)
@@ -69,7 +74,7 @@ func markers_with_prefix(prefix: String) -> Array[Node3D]:
 	for marker_name: String in _markers:
 		if marker_name.begins_with(prefix):
 			matches.append(_markers[marker_name] as Node3D)
-	matches.sort_custom(func(first: Node3D, second: Node3D) -> bool: return first.name < second.name)
+	matches.sort_custom(func(first: Node3D, second: Node3D) -> bool: return String(first.name) < String(second.name))
 	return matches
 
 
@@ -102,6 +107,24 @@ func _index_markers() -> void:
 	for node: Node in _school.find_children("*", "Node3D", true, false):
 		if not _markers.has(String(node.name)):
 			_markers[String(node.name)] = node
+
+
+func _spawn_interactables() -> void:
+	for locker_marker: Node3D in markers_with_prefix("HideLocker_"):
+		_place(HIDE_LOCKER_SCENE, locker_marker)
+	for desk_marker: Node3D in markers_with_prefix("HideDesk_"):
+		_place(HIDE_DESK_SCENE, desk_marker)
+	var seat: ClassSeat = _place(CLASS_SEAT_SCENE, marker("PlayerSeat")) as ClassSeat
+	seat.is_player_seat = true
+	_place(STASH_LOCKER_SCENE, marker("StashLocker"))
+
+
+func _place(scene: PackedScene, anchor: Node3D) -> Node3D:
+	var instance: Node3D = scene.instantiate() as Node3D
+	instance.name = "Interactable_%s" % anchor.name
+	add_child(instance)
+	instance.global_transform = anchor.global_transform
+	return instance
 
 
 func _numbered_markers(prefix: String) -> Array[Node3D]:

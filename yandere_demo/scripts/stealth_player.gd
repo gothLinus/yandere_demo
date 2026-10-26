@@ -13,6 +13,7 @@ const SNEAK_SPEED: float = 1.1
 const VISION_SPEED_MULTIPLIER: float = 0.7
 const STAND_HEIGHT: float = 1.6
 const CROUCH_HEIGHT: float = 1.0
+const CLEARANCE_LIFT: float = 0.05
 
 const MODE_FREE: StringName = &"free"
 const MODE_CAMERA: StringName = &"camera"
@@ -43,6 +44,7 @@ var tuning: StealthTuning = preload("res://data/stealth_tuning.tres")
 var stance: GameTypes.Stance = GameTypes.Stance.WALK
 var mode: StringName = MODE_FREE
 var carried_item: StringName = &""
+var hidden_spot: Node3D
 var is_vision_active: bool = false
 var low_sanity_slow: bool = false
 var can_hide_callable: Callable = _default_can_hide
@@ -133,6 +135,7 @@ func enter_hidden(spot: Node3D) -> bool:
 		return false
 	exit_camera_mode()
 	_snap_to(spot)
+	hidden_spot = spot
 	_set_stance(GameTypes.Stance.HIDDEN)
 	_set_mode(MODE_HIDDEN)
 	return true
@@ -141,8 +144,27 @@ func enter_hidden(spot: Node3D) -> bool:
 func exit_hidden() -> void:
 	if mode != MODE_HIDDEN:
 		return
+	hidden_spot = null
+	if is_node_ready():
+		_camera_rig.clear_peek_view()
 	_set_stance(GameTypes.Stance.SNEAK if _crouching else GameTypes.Stance.WALK)
 	_set_mode(MODE_FREE)
+
+
+func show_peek_view(point: Node3D) -> void:
+	_camera_rig.show_peek_view(point)
+
+
+func is_position_clear(point: Vector3) -> bool:
+	var shape_node: CollisionShape3D = _body_shape.collision_shape
+	if shape_node == null:
+		return true
+	var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+	query.shape = shape_node.shape
+	query.transform = Transform3D(Basis.IDENTITY, point + shape_node.position + Vector3.UP * CLEARANCE_LIFT)
+	query.collision_mask = PhysicsLayers.WORLD
+	query.exclude = [get_rid()]
+	return get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
 func sit(seat: Node3D) -> bool:
@@ -248,11 +270,9 @@ func _poll_actions() -> void:
 		_crouching = not _crouching
 	if Input.is_action_just_pressed(&"interact"):
 		match mode:
-			MODE_HIDDEN:
-				exit_hidden()
 			MODE_SEATED:
 				stand_up()
-			MODE_FREE:
+			MODE_FREE, MODE_HIDDEN:
 				if _current_interactable != null:
 					_current_interactable.interact(self)
 
@@ -312,7 +332,9 @@ func _on_footstep_timer_timeout() -> void:
 
 func _update_interaction() -> void:
 	var nearest: Interactable = null
-	if mode == MODE_FREE:
+	if mode == MODE_HIDDEN:
+		nearest = hidden_spot as Interactable
+	elif mode == MODE_FREE:
 		var nearest_distance: float = INF
 		for area: Area3D in _interaction_area.get_overlapping_areas():
 			var interactable: Interactable = area as Interactable

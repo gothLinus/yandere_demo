@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/class_seat.gd" id="1_seat"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_area"]
+radius = 0.5
+
+[node name="ClassSeat" type="Area3D"]
+script = ExtResource("1_seat")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
+shape = SubResource("SphereShape3D_area")

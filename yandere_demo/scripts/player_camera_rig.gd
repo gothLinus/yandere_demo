@@ -13,6 +13,8 @@ var pitch: float = deg_to_rad(-10.0)
 var shake_strength: float = 0.0
 
 var _viewfinder_active: bool = false
+var _peek_point: Node3D
+var _viewfinder_rest_transform: Transform3D
 var _shake_noise: FastNoiseLite = FastNoiseLite.new()
 
 @onready var _spring_arm: SpringArm3D = $SpringArm3D
@@ -24,6 +26,7 @@ var _shake_noise: FastNoiseLite = FastNoiseLite.new()
 func _ready() -> void:
 	_spring_arm.collision_mask = PhysicsLayers.WORLD
 	_viewfinder_camera.fov = VIEWFINDER_FOV_WIDE
+	_viewfinder_rest_transform = _viewfinder_camera.transform
 	_third_person_camera.make_current()
 	if DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -49,7 +52,10 @@ func _process(_delta: float) -> void:
 	global_position = _follow_target.global_position
 	rotation = Vector3(0.0, yaw, 0.0)
 	_spring_arm.rotation.x = pitch
-	_viewfinder_camera.rotation.x = pitch
+	if _peek_point != null:
+		_viewfinder_camera.global_transform = _peek_point.global_transform
+	else:
+		_viewfinder_camera.rotation.x = pitch
 	var time_seconds: float = Time.get_ticks_msec() / 1000.0 * SHAKE_FREQUENCY
 	var shake_offset: Vector2 = Vector2(
 		_shake_noise.get_noise_2d(time_seconds, 0.0),
@@ -65,7 +71,7 @@ func yaw_basis() -> Basis:
 
 
 func current_camera() -> Camera3D:
-	return _viewfinder_camera if _viewfinder_active else _third_person_camera
+	return _viewfinder_camera if _viewfinder_active or _peek_point != null else _third_person_camera
 
 
 func set_viewfinder_active(active: bool) -> void:
@@ -74,6 +80,24 @@ func set_viewfinder_active(active: bool) -> void:
 		_viewfinder_camera.fov = VIEWFINDER_FOV_WIDE
 		_viewfinder_camera.make_current()
 	else:
+		_third_person_camera.make_current()
+
+
+## Looks through a fixed point (locker slit, under-desk) and keeps the orbit yaw aligned so leaving continues in that direction.
+func show_peek_view(point: Node3D) -> void:
+	_peek_point = point
+	yaw = point.global_rotation.y
+	_viewfinder_camera.fov = VIEWFINDER_FOV_WIDE
+	_viewfinder_camera.global_transform = point.global_transform
+	_viewfinder_camera.make_current()
+
+
+func clear_peek_view() -> void:
+	if _peek_point == null:
+		return
+	_peek_point = null
+	_viewfinder_camera.transform = _viewfinder_rest_transform
+	if not _viewfinder_active:
 		_third_person_camera.make_current()
 
 
