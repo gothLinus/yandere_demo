@@ -6,6 +6,7 @@ const SETTLE_FRAMES: int = 3
 const DOOR_SETTLE_SECONDS: float = 0.5
 const SIT_SETTLE_SECONDS: float = 1.5
 const PICKUP_OFFSET: Vector3 = Vector3(0.0, 0.1, -0.4)
+const HIDDEN_DRIFT_TOLERANCE: float = 0.02
 const PEEK_TOLERANCE: float = 0.01
 
 var _school_env: SchoolEnv
@@ -47,6 +48,10 @@ func _hide_in_first_locker() -> String:
 	if _player.mode != StealthPlayer.MODE_HIDDEN:
 		return "interact at HideLocker_01 did not hide the player (mode %s)" % _player.mode
 	await get_tree().create_timer(DOOR_SETTLE_SECONDS).timeout
+	await _settle()
+	var drift_failure: String = _hidden_drift_failure(_hide_spots()[0])
+	if not drift_failure.is_empty():
+		return drift_failure
 	if not _prompts.has("E – Leave"):
 		return "no 'E – Leave' prompt while hidden: %s" % [_prompts]
 	var spot: HideSpot = _hide_spots()[0]
@@ -125,12 +130,25 @@ func _every_hide_spot_exits_clear() -> String:
 		await _settle()
 		if _player.mode != StealthPlayer.MODE_HIDDEN:
 			return "%s did not hide the player" % spot.get_path()
+		if spot.kind == &"desk":
+			await get_tree().create_timer(DOOR_SETTLE_SECONDS).timeout
+			await _settle()
+			var drift_failure: String = _hidden_drift_failure(spot)
+			if not drift_failure.is_empty():
+				return drift_failure
 		spot.interact(_player)
 		await _settle()
 		if _player.mode != StealthPlayer.MODE_FREE:
 			return "%s did not release the player" % spot.get_path()
 		if not _player.is_position_clear(_player.global_position):
 			return "%s released the player inside a collider at %s" % [spot.get_path(), _player.global_position]
+	return ""
+
+
+func _hidden_drift_failure(spot: HideSpot) -> String:
+	var drift: float = _player.global_position.distance_to(spot.view_point.global_position)
+	if drift > HIDDEN_DRIFT_TOLERANCE:
+		return "%s: hidden body drifted %.3f m from the ViewPoint" % [spot.get_path(), drift]
 	return ""
 
 
