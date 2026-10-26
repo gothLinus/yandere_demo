@@ -94,7 +94,7 @@ Recon renders: the controller's scratchpad, `astolfo_recon/shots/`. Not committe
    - The R10 limits apply: braid and bow drift < 0.08 m from the baked pose, and the bow stays outside the skirt in idle and walk.
    - The skirt never clips the legs.
    - **(user) The skirt is lively.** It swings, flutters and can lift on runs, turns, the startled jump and quick stops. **(user)** It never reveals anything inappropriate.
-     - **(user)** No hard lift limit up front. The coverage check below decides. If it passes with spring tuning alone, no limit is added. If it fails and tuning can't fix it, add the smallest limit that makes it pass: a per-chain rotation limit or a collider shell.
+     - **(user)** Never hard lift limits. The coverage check below decides. If it passes with spring tuning alone, no limit is added. If it fails and tuning can't fix it, prompt the user on what to do.
      - The coverage check below runs across the most energetic clips (walk, look_around, startled, idles), with the springs active.
    - **(builder call) Seated coverage with the short skirt:**
      - The hem is not changed; the user wants the outfit kept exactly.
@@ -114,7 +114,7 @@ Recon renders: the controller's scratchpad, `astolfo_recon/shots/`. Not committe
   - no low or upskirt camera framing
   - no suggestive poses or animations
   - skirt physics may lift the hem but never reveals what the skirt covers (§3.6)
-  - real (jiggle) physics on the chest and glutes
+  - no jiggle or spring physics on the chest, glutes or butt
   - photo scoring (Task 5/17) never rewards such angles
 
   The outfit itself is the user's choice and stays.
@@ -158,7 +158,7 @@ Recon renders: the controller's scratchpad, `astolfo_recon/shots/`. Not committe
   Do not cut or rename the model's meshes and bones just to satisfy the old names. Code that looks up a specific mesh or chain by name (`SecondaryMotion`, `ExpressionController`, the R10 probe) is updated in the same task.
 - **(user) Helper bones stay as the model has them.** The pectoral and glute helper bones and their weights are kept, so the body deforms exactly as the model was made. **(builder call)** They stay plain deformation helpers that follow their parents. They shall get spring or jiggle physics (anti-goal, §5).
 - **(builder call) Scale.** Scale uniformly to 1.62 m. If the model's proportions then miss the world's fixed points (seat height 0.45 m, the R12 seat anchors, hand props, doorways), small rig fixes are allowed: limb lengths within ±5%. Beyond that, adapt the animations and the hitbox, not the world or the markers.
-- **Height** is 1.62 m. The head-to-height ratio and silhouette come from the model, not from §4.1b's numbers.
+- **Height** is 1.62 m. **(user)** The body is kept exactly as the model has it: chest, hips, proportions and silhouette. This supersedes §4.1b's silhouette description (for example "flat chest"); the mesh is not reshaped.
 - **Budget:** the target may stay well above the cast. It is the most detailed character, so ≤ 100k triangles.
 - Every external motion source used is recorded with its license in `yandere_demo/blender/source/MOTION_SOURCES.md`. Only sources that allow use in a private non-commercial project.
 
