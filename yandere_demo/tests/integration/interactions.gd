@@ -2,15 +2,18 @@ extends IntegrationTest
 
 const SCHOOL_ENV_PATH: String = "res://scenes/school_env.tscn"
 const PLAYER_SCENE_PATH: String = "res://scenes/player.tscn"
+const HUD_SCENE_PATH: String = "res://scenes/ui/hud.tscn"
 const SETTLE_FRAMES: int = 3
 const DOOR_SETTLE_SECONDS: float = 0.5
 const SIT_SETTLE_SECONDS: float = 1.5
 const PICKUP_OFFSET: Vector3 = Vector3(0.0, 0.1, -0.4)
 const HIDDEN_DRIFT_TOLERANCE: float = 0.02
 const PEEK_TOLERANCE: float = 0.01
+const DOOR_CLOSED_MARGIN_SECONDS: float = 0.1
 
 var _school_env: SchoolEnv
 var _player: StealthPlayer
+var _peek_slats: Control
 var _prompts: Array[String] = []
 var _picked_ids: Array[StringName] = []
 var _stashed_ids: Array[StringName] = []
@@ -22,8 +25,12 @@ func _ready() -> void:
 	add_child(_school_env)
 	await _school_env.navigation_ready
 	_player = (load(PLAYER_SCENE_PATH) as PackedScene).instantiate() as StealthPlayer
+	_player.add_to_group(&"player")
 	add_child(_player)
 	_player.global_transform = _school_env.marker("PlayerSpawn").global_transform
+	var hud: Control = (load(HUD_SCENE_PATH) as PackedScene).instantiate() as Control
+	add_child(hud)
+	_peek_slats = hud.get_node(^"%PeekSlats") as Control
 	_player.interact_prompt_changed.connect(func(text: String) -> void: _prompts.append(text))
 	await _settle()
 	var failure: String = await _run_scenario()
@@ -143,17 +150,37 @@ func _every_hide_spot_exits_clear() -> String:
 		await _settle()
 		if _player.mode != StealthPlayer.MODE_FREE:
 			return "%s did not release the player" % spot.get_path()
+		if _peek_slats.visible:
+			return "%s: the locker slits stayed up after leaving" % spot.get_path()
 		if not _player.is_position_clear(_player.global_position):
 			return "%s released the player inside a collider at %s" % [spot.get_path(), _player.global_position]
 	return ""
 
 
-## The peek camera sits inside the crouched hide pose, so it must not render the player's own body.
+## The peek camera sits inside the crouched hide pose, so it must not render the player's own body; a locker's peek
+## camera looks out from in front of the door, which would otherwise fill the view.
 func _hidden_view_failure(spot: HideSpot) -> String:
 	await get_tree().process_frame
 	var own_body_failure: String = _own_body_rendered_failure(_player.current_camera())
 	if not own_body_failure.is_empty():
 		return "%s: %s" % [spot.get_path(), own_body_failure]
+	if _peek_slats.visible != (spot.kind == &"locker"):
+		return "%s: the locker slits are %s in a %s" % [
+				spot.get_path(), "shown" if _peek_slats.visible else "missing", spot.kind]
+	var door: MeshInstance3D = spot.get_node_or_null(^"DoorPivot/Door") as MeshInstance3D
+	if door == null:
+		return ""
+	# The door swings open and shut on entering.
+	await get_tree().create_timer(HideSpot.DOOR_SECONDS * 2.0 + DOOR_CLOSED_MARGIN_SECONDS).timeout
+	var to_spot: Transform3D = spot.global_transform.affine_inverse()
+	var door_front: float = -INF
+	var door_box: AABB = door.get_aabb()
+	for corner_index: int in 8:
+		door_front = maxf(door_front, (to_spot * (door.global_transform * door_box.get_endpoint(corner_index))).z)
+	var camera_depth: float = (to_spot * _player.current_camera().global_position).z
+	if camera_depth <= door_front:
+		return "%s: the peek camera (z %.3f) is behind the door's front face (z %.3f), so it sees only the door" % [
+				spot.get_path(), camera_depth, door_front]
 	return ""
 
 

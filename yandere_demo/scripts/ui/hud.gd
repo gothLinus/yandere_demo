@@ -9,6 +9,7 @@ const HEARD_ICON_SECONDS: float = 1.2
 const EDGE_FLASH_SECONDS: float = 0.5
 const ALERT_MARK_POP_SECONDS: float = 0.35
 const ALERT_MARK_POP_SCALE: float = 1.8
+const LOCKER_KIND: StringName = &"locker"
 
 var _player: StealthPlayer
 var _perception: TargetPerception
@@ -28,6 +29,7 @@ var _alert: float = 0.0
 @onready var _item_swatch: Panel = %ItemSwatch
 @onready var _item_name: Label = %ItemName
 @onready var _prompt_label: Label = %PromptLabel
+@onready var _peek_slats: PeekSlats = %PeekSlats
 
 
 func _ready() -> void:
@@ -63,6 +65,7 @@ func _bind_actors() -> void:
 		_player = player
 		_player.interact_prompt_changed.connect(_on_interact_prompt_changed)
 		_player.carried_item_changed.connect(_on_carried_item_changed)
+		_player.mode_changed.connect(_on_player_mode_changed)
 	var target: TargetAI = get_tree().get_first_node_in_group(TARGET_GROUP) as TargetAI
 	if target != null and target.perception != _perception:
 		_perception = target.perception
@@ -138,3 +141,8 @@ func _on_carried_item_changed(item_id: StringName) -> void:
 func _on_interact_prompt_changed(text: String) -> void:
 	_prompt_label.text = text
 	_prompt_label.visible = not text.is_empty()
+
+
+func _on_player_mode_changed(mode: StringName) -> void:
+	var spot: HideSpot = _player.hidden_spot as HideSpot
+	_peek_slats.visible = mode == StealthPlayer.MODE_HIDDEN and spot != null and spot.kind == LOCKER_KIND
