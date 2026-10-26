@@ -68,6 +68,11 @@ func _process(_delta: float) -> void:
 		camera.v_offset = shake_offset.y
 
 
+## The viewfinder camera, which also serves the peek views, stops rendering these render layers.
+func hide_in_first_person(render_layers: int) -> void:
+	_viewfinder_camera.cull_mask &= ~render_layers
+
+
 func yaw_basis() -> Basis:
 	return Basis(Vector3.UP, yaw)
 

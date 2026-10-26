@@ -136,12 +136,32 @@ func _every_hide_spot_exits_clear() -> String:
 			var drift_failure: String = _hidden_drift_failure(spot)
 			if not drift_failure.is_empty():
 				return drift_failure
+		var view_failure: String = await _hidden_view_failure(spot)
+		if not view_failure.is_empty():
+			return view_failure
 		spot.interact(_player)
 		await _settle()
 		if _player.mode != StealthPlayer.MODE_FREE:
 			return "%s did not release the player" % spot.get_path()
 		if not _player.is_position_clear(_player.global_position):
 			return "%s released the player inside a collider at %s" % [spot.get_path(), _player.global_position]
+	return ""
+
+
+## The peek camera sits inside the crouched hide pose, so it must not render the player's own body.
+func _hidden_view_failure(spot: HideSpot) -> String:
+	await get_tree().process_frame
+	var own_body_failure: String = _own_body_rendered_failure(_player.current_camera())
+	if not own_body_failure.is_empty():
+		return "%s: %s" % [spot.get_path(), own_body_failure]
+	return ""
+
+
+func _own_body_rendered_failure(camera: Camera3D) -> String:
+	for node: Node in _player.get_node(^"Model").find_children("*", "VisualInstance3D", true, false):
+		var visual: VisualInstance3D = node as VisualInstance3D
+		if visual.is_visible_in_tree() and camera.cull_mask & visual.layers != 0:
+			return "the peek camera renders the player's own %s" % visual.name
 	return ""
 
 

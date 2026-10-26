@@ -30,6 +30,9 @@ const CAMERA_PROP_BODY_SIZE: Vector3 = Vector3(0.12, 0.08, 0.06)
 const CAMERA_PROP_LENS_RADIUS: float = 0.028
 const CAMERA_PROP_LENS_LENGTH: float = 0.04
 const CAMERA_PROP_OFFSET: Vector3 = Vector3(0.0, 0.05, 0.03)
+## Render layer of the player's own meshes. The first-person cameras (viewfinder and hide-spot peek views) sit inside
+## the head or the crouched body, so they leave it out; the third-person camera keeps it.
+const OWN_BODY_RENDER_LAYER: int = 1 << 19
 
 const STATE_LOCOMOTION: StringName = &"locomotion"
 const STATE_PHOTO: StringName = &"photo"
@@ -75,6 +78,9 @@ func _ready() -> void:
 	_interaction_area.collision_mask = PhysicsLayers.INTERACTABLE
 	_build_animation_tree()
 	_build_camera_prop()
+	for node: Node in _model.find_children("*", "VisualInstance3D", true, false):
+		(node as VisualInstance3D).layers = OWN_BODY_RENDER_LAYER
+	_camera_rig.hide_in_first_person(OWN_BODY_RENDER_LAYER)
 	_footstep_timer.timeout.connect(_on_footstep_timer_timeout)
 
 

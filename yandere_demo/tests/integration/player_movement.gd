@@ -89,11 +89,25 @@ func _ready() -> void:
 	if playback.get_current_node() != &"photo" or prop == null or not prop.is_visible_in_tree():
 		fail_test("camera mode did not raise the camera (state %s)" % playback.get_current_node())
 		return
+	if _renders_own_body(player, player.current_camera()):
+		fail_test("the viewfinder renders the player's own body, which fills the view from inside the head")
+		return
 	player.exit_camera_mode()
 	if prop.visible:
 		fail_test("camera prop still visible outside camera mode")
 		return
+	if not _renders_own_body(player, player.current_camera()):
+		fail_test("the third-person camera does not render the player")
+		return
 	pass_test()
+
+
+func _renders_own_body(player: StealthPlayer, camera: Camera3D) -> bool:
+	for node: Node in player.get_node(^"Model").find_children("*", "VisualInstance3D", true, false):
+		var visual: VisualInstance3D = node as VisualInstance3D
+		if visual.is_visible_in_tree() and camera.cull_mask & visual.layers != 0:
+			return true
+	return false
 
 
 func _line_of_sight_ignores_characters(player: StealthPlayer) -> bool:
