@@ -1,0 +1,51 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/stealth_player.gd" id="1_player"]
+[ext_resource type="PackedScene" path="res://assets/models/player.glb" id="2_model"]
+[ext_resource type="Script" path="res://scripts/character_body_shape.gd" id="3_body_shape"]
+[ext_resource type="Script" path="res://scripts/player_camera_rig.gd" id="4_rig"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_interaction"]
+radius = 1.2
+
+[node name="Player" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 1
+script = ExtResource("1_player")
+
+[node name="Model" parent="." instance=ExtResource("2_model")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+
+[node name="CharacterBodyShape" type="Node" parent="."]
+script = ExtResource("3_body_shape")
+model_path = NodePath("../Model")
+
+[node name="AnimationTree" type="AnimationTree" parent="."]
+active = false
+anim_player = NodePath("../Model/AnimationPlayer")
+
+[node name="CameraRig" type="Node3D" parent="."]
+top_level = true
+script = ExtResource("4_rig")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.45, 1.5, 0)
+collision_mask = 1
+spring_length = 2.6
+margin = 0.1
+
+[node name="ThirdPersonCamera" type="Camera3D" parent="CameraRig/SpringArm3D"]
+
+[node name="ViewfinderCamera" type="Camera3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+fov = 50.0
+
+[node name="InteractionArea" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 4
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InteractionArea"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
+shape = SubResource("SphereShape3D_interaction")
+
+[node name="FootstepTimer" type="Timer" parent="."]

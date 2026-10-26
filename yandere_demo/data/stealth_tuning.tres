@@ -57,3 +57,4 @@ sanity_photo_bonus = 10.0
 vignette_sanity_threshold = 40.0
 no_hide_sanity_threshold = 10.0
 sneak_speed_low_sanity_multiplier = 0.75
+footstep_stride_meters = 0.9

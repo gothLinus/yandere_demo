@@ -61,6 +61,7 @@ func _init() -> void:
 				continue
 			test_case.before_each()
 			test_case.call(method_name)
+			test_case.after_each()
 			var messages: Array[String] = test_case.failures.duplicate()
 			for error_text: String in collector.take_errors():
 				messages.append("runtime error: %s" % error_text)

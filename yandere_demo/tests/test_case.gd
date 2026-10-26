@@ -8,6 +8,10 @@ func before_each() -> void:
 	pass
 
 
+func after_each() -> void:
+	pass
+
+
 func assert_true(condition: bool, message: String = "") -> void:
 	if not condition:
 		failures.append("assert_true failed. %s" % message)

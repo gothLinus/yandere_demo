@@ -54,3 +54,4 @@ extends Resource
 @export var vignette_sanity_threshold: float = 40.0
 @export var no_hide_sanity_threshold: float = 10.0
 @export var sneak_speed_low_sanity_multiplier: float = 0.75
+@export var footstep_stride_meters: float = 0.9
