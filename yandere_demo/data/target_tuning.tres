@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="TargetTuning" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/target_tuning.gd" id="1_tuning"]
+
+[resource]
+script = ExtResource("1_tuning")
+turn_rate = 8.0
+acceleration = 2.5
+arriving_radius = 1.5
+arriving_speed_ratio = 0.35
+entering_distance = 0.3
+seated_entering_distance = 0.8
+entering_min_seconds = 0.4
+entering_max_speed = 1.2
+micro_stop_path_fractions = Array[float]([0.3, 0.65])
+micro_stop_seconds = 3.0
+window_search_radius = 6.0
+glance_back_degrees = 120.0
+head_turn_seconds = 0.3
+unreachable_seconds = 8.0
+unreachable_min_progress = 0.2
+courtyard_spots = Array[StringName]([&"StudentSpot_01", &"StudentSpot_02", &"StudentSpot_03", &"StudentSpot_04", &"StudentSpot_05", &"StudentSpot_06"])
+stroll_spot_count = 3
+class_locker_items = Array[StringName]([&"hairpin", &"note", &"pen"])
+class_locker_min_items = 1
+class_locker_max_items = 2
+blink_min_seconds = 2.0
+blink_max_seconds = 6.0
+blink_seconds = 0.15
