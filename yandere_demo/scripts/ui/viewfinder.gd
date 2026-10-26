@@ -24,7 +24,7 @@ var _player: StealthPlayer
 var _desaturate_material: ShaderMaterial = ShaderMaterial.new()
 
 @onready var _zoom_label: Label = %ZoomLabel
-@onready var _flash_label: Label = %FlashLabel
+@onready var _flash_icon: FlashIcon = %FlashIcon
 @onready var _shot_label: Label = %ShotLabel
 @onready var _flash_rect: ColorRect = %FlashRect
 @onready var _desaturate_rect: ColorRect = %DesaturateRect
@@ -93,7 +93,7 @@ func _on_focus_quality_changed(preview_score: int) -> void:
 
 
 func _on_flash_toggled(enabled: bool) -> void:
-	_flash_label.text = "Flash on" if enabled else "Flash off"
+	_flash_icon.is_lit = enabled
 
 
 func _on_zoom_changed(factor: float) -> void:

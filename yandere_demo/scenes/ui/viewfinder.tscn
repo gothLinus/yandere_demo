@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Theme" path="res://scripts/ui/ui_theme.tres" id="1_theme"]
 [ext_resource type="Script" path="res://scripts/ui/viewfinder.gd" id="2_script"]
+[ext_resource type="Script" path="res://scripts/ui/flash_icon.gd" id="3_flash"]
 
 [node name="Viewfinder" type="Control"]
 layout_mode = 3
@@ -39,11 +40,12 @@ layout_mode = 2
 text = "1.0x"
 horizontal_alignment = 2
 
-[node name="FlashLabel" type="Label" parent="Readout/Content"]
+[node name="FlashIcon" type="Control" parent="Readout/Content"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 32)
 layout_mode = 2
-text = "Flash off"
-horizontal_alignment = 2
+size_flags_horizontal = 8
+script = ExtResource("3_flash")
 
 [node name="ShotLabel" type="Label" parent="Readout/Content"]
 unique_name_in_owner = true
