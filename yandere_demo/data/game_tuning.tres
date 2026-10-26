@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="GameTuning" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/game_tuning.gd" id="1_tuning"]
+
+[resource]
+script = ExtResource("1_tuning")
+fast_forward_time_scale = 4.0
+low_sanity_shake_strength = 0.04
+daylight_tick_seconds = 1.0

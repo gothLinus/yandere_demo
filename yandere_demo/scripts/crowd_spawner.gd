@@ -10,7 +10,7 @@ const RANDOM_SALT: StringName = &"student"
 
 @export var student_count: int = 10
 
-## Both injected until the Task 18 autoloads exist; passed on to every student.
+## Both injected by GameManager and passed on to every student; null falls back to the autoloads in StudentAI.setup().
 var meters: StealthMeters
 var clock: SchoolClockModel
 var students: Array[StudentAI] = []

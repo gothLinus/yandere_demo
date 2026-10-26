@@ -25,7 +25,4 @@ func _default_is_class_block() -> bool:
 	if not is_inside_tree():
 		return false
 	var clock: Node = get_node_or_null("/root/SchoolClock")
-	if clock == null:
-		return false
-	var block: ScheduleBlock = clock.model.current_block()
-	return block != null and block.kind == GameTypes.BlockKind.CLASS
+	return clock != null and clock.is_class_block()

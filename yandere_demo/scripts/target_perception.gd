@@ -6,7 +6,7 @@ extends Node
 @export var tuning: StealthTuning = preload("res://data/stealth_tuning.tres")
 
 var player: StealthPlayer
-## Injected until the Task 18 autoload holds the meters.
+## Injected through watch(); GameManager passes the SanitySystem autoload's meters.
 var meters: StealthMeters
 var sees_player: bool = false
 
@@ -18,8 +18,14 @@ var _spiked_item_ids: Dictionary = {}
 
 
 func _physics_process(delta: float) -> void:
-	if player == null or meters == null or not _is_aware():
+	if player == null or meters == null:
 		sees_player = false
+		return
+	if not _is_aware():
+		sees_player = false
+		# Once he has gone home he can no longer see the player, so Suspicion keeps falling instead of freezing.
+		if _target.state == TargetAI.State.GONE:
+			meters.apply_unseen(delta, player.mode == StealthPlayer.MODE_HIDDEN)
 		return
 	var player_head: Vector3 = player.head_position()
 	var is_hidden: bool = player.mode == StealthPlayer.MODE_HIDDEN

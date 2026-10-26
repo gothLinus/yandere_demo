@@ -49,7 +49,7 @@ func is_day_over() -> bool:
 
 func clock_text(day_index: int) -> String:
 	var total_minutes: int = floori(current_minute)
-	return "%s %02d:%02d" % [GameTypes.WEEKDAY_NAMES[day_index], total_minutes / 60, total_minutes % 60]
+	return "%s %02d:%02d" % [GameTypes.WEEKDAY_NAMES[clampi(day_index, 0, GameTypes.WEEKDAY_NAMES.size() - 1)], total_minutes / 60, total_minutes % 60]
 
 
 func _enter_next_block() -> void:

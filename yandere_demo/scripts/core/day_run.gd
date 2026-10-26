@@ -1,6 +1,8 @@
 class_name DayRun
 extends RefCounted
 
+signal intel_unlocked(card_id: StringName)
+
 var photos: Array[Dictionary] = []
 var stashed_items: Array[StringName] = []
 var carried_item: StringName = &""
@@ -15,4 +17,5 @@ func unlock_intel(card_id: StringName, banked: Array[StringName]) -> bool:
 	if card_id == &"" or intel.has(card_id) or banked.has(card_id):
 		return false
 	intel.append(card_id)
+	intel_unlocked.emit(card_id)
 	return true

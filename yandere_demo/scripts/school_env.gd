@@ -13,6 +13,8 @@ const STASH_LOCKER_SCENE: PackedScene = preload("res://scenes/props/stash_locker
 
 @export var daylight_profile: DaylightProfile = preload("res://data/daylight_profile.tres")
 
+var is_navigation_ready: bool = false
+
 var _markers: Dictionary = {}
 
 @onready var _school: Node3D = $School
@@ -41,6 +43,7 @@ func _ready() -> void:
 			waited_frames += 1
 		if waited_frames >= MAX_SYNC_FRAMES:
 			push_error("SchoolEnv: navigation map did not sync within %d frames" % MAX_SYNC_FRAMES)
+	is_navigation_ready = true
 	navigation_ready.emit()
 
 

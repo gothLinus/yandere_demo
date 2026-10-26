@@ -21,7 +21,7 @@ const REASON_CARRYING_STOLEN_ITEM: StringName = &"carrying_stolen_item"
 @export var patrols: bool = true
 
 var player: StealthPlayer
-## Injected until the Task 18 autoload holds the meters.
+## Injected (tests, GameManager); setup() falls back to the SanitySystem autoload's meters.
 var meters: StealthMeters
 ## Optional: counts with the students for `camera_at_student`.
 var target: TargetAI
@@ -49,6 +49,8 @@ func setup(school_env: SchoolEnv) -> void:
 	_reset_motion()
 	if clock == null:
 		clock = _autoload_clock()
+	if meters == null:
+		meters = _autoload_meters()
 	_patrol_points = school.markers_with_prefix(PATROL_PREFIX)
 	_look_around_seconds_left = 0.0
 	_is_walking = false

@@ -67,7 +67,7 @@ var school: SchoolEnv
 var scheduler: TargetScheduler
 var plan: Array[PlannedActivity] = []
 var state: State = State.ACTIVITY
-## Injected until the SchoolClock autoload exists (Task 18).
+## Injected (tests, GameManager); setup() falls back to the SchoolClock autoload's model.
 var clock: SchoolClockModel
 
 var _day_seed: int = 0

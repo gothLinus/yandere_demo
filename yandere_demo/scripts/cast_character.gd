@@ -15,11 +15,12 @@ const FLOOR_SNAP_LENGTH: float = 0.4
 const MINIMUM_DIRECTION_LENGTH: float = 0.001
 const PATH_END_TOLERANCE: float = 0.1
 const CLOCK_AUTOLOAD_PATH: NodePath = ^"/root/SchoolClock"
+const SANITY_AUTOLOAD_PATH: NodePath = ^"/root/SanitySystem"
 
 @export var tuning: CastTuning = preload("res://data/cast_tuning.tres")
 
 var school: SchoolEnv
-## Injected until the SchoolClock autoload exists (Task 18).
+## Injected (tests, GameManager); setup() falls back to the SchoolClock autoload's model.
 var clock: SchoolClockModel
 
 var _speed: float = 0.0
@@ -107,6 +108,11 @@ func _reset_motion() -> void:
 func _autoload_clock() -> SchoolClockModel:
 	var autoload: Node = get_node_or_null(CLOCK_AUTOLOAD_PATH)
 	return autoload.get("model") as SchoolClockModel if autoload != null else null
+
+
+func _autoload_meters() -> StealthMeters:
+	var autoload: Node = get_node_or_null(SANITY_AUTOLOAD_PATH)
+	return autoload.get("meters") as StealthMeters if autoload != null else null
 
 
 ## Returns false when the navmesh has no path there.

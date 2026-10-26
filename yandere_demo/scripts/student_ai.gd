@@ -29,7 +29,7 @@ const HAIR_COLOR_SHIFT: int = 16
 @export var variant: int = 0
 
 var seat: Node3D
-## Injected until the Task 18 autoload holds the meters.
+## Injected (tests, GameManager); setup() falls back to the SanitySystem autoload's meters.
 var meters: StealthMeters
 var mode: Mode = Mode.IDLE
 
@@ -64,6 +64,8 @@ func setup(school_env: SchoolEnv, assigned_seat: Node3D, random_seed: int) -> vo
 	_random.seed = random_seed
 	_agent.set_navigation_map(school.navigation_map())
 	_reset_motion()
+	if meters == null:
+		meters = _autoload_meters()
 	if clock == null:
 		clock = _autoload_clock()
 	if clock == null:
