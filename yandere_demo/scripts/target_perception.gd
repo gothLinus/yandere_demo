@@ -3,12 +3,20 @@ extends Node
 ## The target's senses (spec §4.5). Every physics frame his sight feeds Suspicion; noticing, startling, seeing his
 ## own item carried, footsteps and the report drive his reaction states on the parent TargetAI.
 
+signal sight_changed(is_seen: bool)
+signal heard_player()
+
 @export var tuning: StealthTuning = preload("res://data/stealth_tuning.tres")
 
 var player: StealthPlayer
 ## Injected through watch(); GameManager passes the SanitySystem autoload's meters.
 var meters: StealthMeters
-var sees_player: bool = false
+var sees_player: bool = false:
+	set(value):
+		if value == sees_player:
+			return
+		sees_player = value
+		sight_changed.emit(value)
 
 var _startle_armed: bool = true
 ## Ids of his items already punished as carried, as a set: each counts once.
@@ -120,4 +128,5 @@ func _on_caught(reason: StringName) -> void:
 
 func _on_noise_made(noise_position: Vector3, stance: GameTypes.Stance) -> void:
 	if _is_aware() and Detection.can_hear(_target.global_position, noise_position, stance, tuning):
+		heard_player.emit()
 		_target.glance_at(player.head_position())

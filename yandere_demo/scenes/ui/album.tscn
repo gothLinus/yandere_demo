@@ -1,0 +1,101 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Theme" path="res://scripts/ui/ui_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/album.gd" id="2_script"]
+
+[node name="Album" type="CanvasLayer"]
+layer = 30
+script = ExtResource("2_script")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+
+[node name="Dim" type="ColorRect" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.05, 0.02, 0.07, 0.75)
+
+[node name="Margin" type="MarginContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 96
+theme_override_constants/margin_top = 64
+theme_override_constants/margin_right = 96
+theme_override_constants/margin_bottom = 64
+
+[node name="Content" type="VBoxContainer" parent="Root/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Tabs" type="TabContainer" parent="Root/Margin/Content"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Photos" type="ScrollContainer" parent="Root/Margin/Content/Tabs"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="PhotoGrid" type="GridContainer" parent="Root/Margin/Content/Tabs/Photos"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 16
+columns = 4
+
+[node name="Items" type="ScrollContainer" parent="Root/Margin/Content/Tabs"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="ItemList" type="VBoxContainer" parent="Root/Margin/Content/Tabs/Items"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="Intel" type="ScrollContainer" parent="Root/Margin/Content/Tabs"]
+visible = false
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="IntelContent" type="VBoxContainer" parent="Root/Margin/Content/Tabs/Intel"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="IntelList" type="VBoxContainer" parent="Root/Margin/Content/Tabs/Intel/IntelContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="WeightsHeading" type="Label" parent="Root/Margin/Content/Tabs/Intel/IntelContent"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.56, 0.72, 1)
+text = "Where he is likely to go tomorrow"
+
+[node name="WeightList" type="VBoxContainer" parent="Root/Margin/Content/Tabs/Intel/IntelContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CloseButton" type="Button" parent="Root/Margin/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+size_flags_horizontal = 8
+text = "Close"

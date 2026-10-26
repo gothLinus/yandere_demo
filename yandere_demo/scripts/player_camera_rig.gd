@@ -1,6 +1,8 @@
 class_name PlayerCameraRig
 extends Node3D
 
+signal zoom_changed(factor: float)
+
 const PITCH_LIMIT: float = deg_to_rad(70.0)
 const VIEWFINDER_FOV_WIDE: float = 50.0
 const VIEWFINDER_FOV_TELE: float = 20.0
@@ -79,6 +81,7 @@ func set_viewfinder_active(active: bool) -> void:
 	if active:
 		_viewfinder_camera.fov = VIEWFINDER_FOV_WIDE
 		_viewfinder_camera.make_current()
+		zoom_changed.emit(1.0)
 	else:
 		_third_person_camera.make_current()
 
@@ -103,3 +106,4 @@ func clear_peek_view() -> void:
 
 func _zoom(fov_delta: float) -> void:
 	_viewfinder_camera.fov = clampf(_viewfinder_camera.fov + fov_delta, VIEWFINDER_FOV_TELE, VIEWFINDER_FOV_WIDE)
+	zoom_changed.emit(VIEWFINDER_FOV_WIDE / _viewfinder_camera.fov)

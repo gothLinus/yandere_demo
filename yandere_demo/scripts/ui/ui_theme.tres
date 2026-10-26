@@ -1,0 +1,194 @@
+[gd_resource type="Theme" load_steps=14 format=3]
+
+[sub_resource type="SystemFont" id="Font_rounded"]
+font_names = PackedStringArray("Hiragino Maru Gothic ProN", "Arial Rounded MT Bold")
+
+[sub_resource type="StyleBoxFlat" id="Panel"]
+bg_color = Color(0.102, 0.0627, 0.1255, 0.8)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 10
+content_margin_bottom = 10
+
+[sub_resource type="StyleBoxFlat" id="Button_normal"]
+bg_color = Color(0.102, 0.0627, 0.1255, 0.8)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Button_hover"]
+bg_color = Color(0.2, 0.11, 0.24, 0.92)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Button_pressed"]
+bg_color = Color(1, 0.5608, 0.7216, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Button_disabled"]
+bg_color = Color(0.102, 0.0627, 0.1255, 0.5)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 0.3)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Button_focus"]
+bg_color = Color(0, 0, 0, 0)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 1, 1, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Bar_background"]
+bg_color = Color(0.102, 0.0627, 0.1255, 0.8)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 0.45)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+content_margin_left = 4
+content_margin_right = 4
+content_margin_top = 4
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="Bar_fill"]
+bg_color = Color(1, 0.5608, 0.7216, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 4
+content_margin_right = 4
+content_margin_top = 4
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="Tab_selected"]
+bg_color = Color(1, 0.5608, 0.7216, 0.9)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 18
+content_margin_right = 18
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Tab_unselected"]
+bg_color = Color(0.102, 0.0627, 0.1255, 0.6)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 18
+content_margin_right = 18
+content_margin_top = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="Tab_panel"]
+bg_color = Color(0.102, 0.0627, 0.1255, 0.8)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_color = Color(1, 0.5608, 0.7216, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+content_margin_left = 14
+content_margin_right = 14
+content_margin_top = 12
+content_margin_bottom = 12
+
+[resource]
+default_font = SubResource("Font_rounded")
+default_font_size = 18
+Label/colors/font_color = Color(1, 1, 1, 1)
+Label/colors/font_shadow_color = Color(0.102, 0.0627, 0.1255, 0.9)
+Label/constants/shadow_offset_x = 0
+Label/constants/shadow_offset_y = 2
+Panel/styles/panel = SubResource("Panel")
+PanelContainer/styles/panel = SubResource("Panel")
+Button/styles/normal = SubResource("Button_normal")
+Button/styles/hover = SubResource("Button_hover")
+Button/styles/pressed = SubResource("Button_pressed")
+Button/styles/disabled = SubResource("Button_disabled")
+Button/styles/focus = SubResource("Button_focus")
+Button/colors/font_color = Color(1, 1, 1, 1)
+Button/colors/font_hover_color = Color(1, 1, 1, 1)
+Button/colors/font_pressed_color = Color(0.102, 0.0627, 0.1255, 1)
+Button/colors/font_disabled_color = Color(1, 1, 1, 0.4)
+Button/font_sizes/font_size = 22
+ProgressBar/styles/background = SubResource("Bar_background")
+ProgressBar/styles/fill = SubResource("Bar_fill")
+TabContainer/styles/tab_selected = SubResource("Tab_selected")
+TabContainer/styles/tab_unselected = SubResource("Tab_unselected")
+TabContainer/styles/tab_hovered = SubResource("Tab_selected")
+TabContainer/styles/panel = SubResource("Tab_panel")
+TabContainer/colors/font_selected_color = Color(0.102, 0.0627, 0.1255, 1)
+TabContainer/colors/font_unselected_color = Color(1, 1, 1, 1)
+TabContainer/colors/font_hovered_color = Color(0.102, 0.0627, 0.1255, 1)

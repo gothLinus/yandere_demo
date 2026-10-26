@@ -1,0 +1,244 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Theme" path="res://scripts/ui/ui_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="2_hud"]
+[ext_resource type="Script" path="res://scripts/ui/vignette.gd" id="3_vignette"]
+[ext_resource type="Script" path="res://scripts/ui/sanity_heart.gd" id="4_heart"]
+[ext_resource type="Script" path="res://scripts/ui/sense_icon.gd" id="5_sense"]
+[ext_resource type="Script" path="res://scripts/ui/bell_banner.gd" id="6_banner"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_edge"]
+bg_color = Color(1, 0.2, 0.3, 0.12)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(1, 0.2, 0.3, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_swatch"]
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[node name="Hud" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("1_theme")
+script = ExtResource("2_hud")
+
+[node name="Vignette" type="ColorRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
+script = ExtResource("3_vignette")
+
+[node name="TopLeft" type="HBoxContainer" parent="."]
+layout_mode = 1
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 24.0
+offset_bottom = 24.0
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="SanityHeart" type="TextureProgressBar" parent="TopLeft"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 120)
+layout_mode = 2
+size_flags_vertical = 0
+value = 100.0
+fill_mode = 4
+script = ExtResource("4_heart")
+
+[node name="Meters" type="VBoxContainer" parent="TopLeft"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="SuspicionPanel" type="PanelContainer" parent="TopLeft/Meters"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Content" type="VBoxContainer" parent="TopLeft/Meters/SuspicionPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="TopLeft/Meters/SuspicionPanel/Content"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="TopLeft/Meters/SuspicionPanel/Content/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Suspicion"
+
+[node name="SenseIcon" type="Control" parent="TopLeft/Meters/SuspicionPanel/Content/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(30, 24)
+layout_mode = 2
+script = ExtResource("5_sense")
+
+[node name="SuspicionLabel" type="Label" parent="TopLeft/Meters/SuspicionPanel/Content/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+text = "0%"
+horizontal_alignment = 2
+
+[node name="SuspicionBar" type="ProgressBar" parent="TopLeft/Meters/SuspicionPanel/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+mouse_filter = 2
+show_percentage = false
+
+[node name="SuspicionEdge" type="Panel" parent="TopLeft/Meters/SuspicionPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_edge")
+
+[node name="AlertPanel" type="PanelContainer" parent="TopLeft/Meters"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Content" type="VBoxContainer" parent="TopLeft/Meters/AlertPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="TopLeft/Meters/AlertPanel/Content"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="TopLeft/Meters/AlertPanel/Content/Header"]
+layout_mode = 2
+text = "School Alert"
+
+[node name="AlertMark" type="Label" parent="TopLeft/Meters/AlertPanel/Content/Header"]
+unique_name_in_owner = true
+modulate = Color(1, 0.56, 0.72, 1)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "!"
+
+[node name="AlertLabel" type="Label" parent="TopLeft/Meters/AlertPanel/Content/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(52, 0)
+layout_mode = 2
+text = "0%"
+horizontal_alignment = 2
+
+[node name="AlertBar" type="ProgressBar" parent="TopLeft/Meters/AlertPanel/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+mouse_filter = 2
+show_percentage = false
+
+[node name="ClockPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 24.0
+grow_horizontal = 0
+mouse_filter = 2
+
+[node name="ClockLabel" type="Label" parent="ClockPanel"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Mon 07:00"
+horizontal_alignment = 2
+
+[node name="ItemSlot" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -24.0
+offset_right = 24.0
+offset_bottom = -24.0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="Content" type="HBoxContainer" parent="ItemSlot"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="ItemSwatch" type="Panel" parent="ItemSlot/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_swatch")
+
+[node name="ItemName" type="Label" parent="ItemSlot/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+text = "Item"
+
+[node name="PromptLabel" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -96.0
+offset_right = 200.0
+offset_bottom = -64.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1
+
+[node name="BellBanner" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -200.0
+offset_top = -120.0
+offset_right = 200.0
+offset_bottom = -76.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("6_banner")
+
+[node name="Label" type="Label" parent="BellBanner"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1

@@ -1,0 +1,74 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Theme" path="res://scripts/ui/ui_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/viewfinder.gd" id="2_script"]
+
+[node name="Viewfinder" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("1_theme")
+script = ExtResource("2_script")
+
+[node name="Readout" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -80.0
+offset_top = -80.0
+offset_right = -80.0
+offset_bottom = -80.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="Content" type="VBoxContainer" parent="Readout"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ZoomLabel" type="Label" parent="Readout/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "1.0x"
+horizontal_alignment = 2
+
+[node name="FlashLabel" type="Label" parent="Readout/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Flash off"
+horizontal_alignment = 2
+
+[node name="ShotLabel" type="Label" parent="Readout/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Shots 0"
+horizontal_alignment = 2
+
+[node name="DesaturateRect" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="FlashRect" type="ColorRect" parent="."]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
