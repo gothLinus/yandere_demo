@@ -94,7 +94,7 @@ Recon renders: the controller's scratchpad, `astolfo_recon/shots/`. Not committe
    - The R10 limits apply: braid and bow drift < 0.08 m from the baked pose, and the bow stays outside the skirt in idle and walk.
    - The skirt never clips the legs.
    - **(user) The skirt is lively.** It swings, flutters and can lift on runs, turns, the startled jump and quick stops. **(user)** It never reveals anything inappropriate.
-     - **(builder call)** Enforce this with a hard per-chain lift limit: a rotation limit or a collider shell, not just soft tuning. The hem can rise but never past the line that keeps the crotch region covered from any reachable camera position.
+     - **(user)** No hard lift limit up front. The coverage check below decides. If it passes with spring tuning alone, no limit is added. If it fails and tuning can't fix it, add the smallest limit that makes it pass: a per-chain rotation limit or a collider shell.
      - The coverage check below runs across the most energetic clips (walk, look_around, startled, idles), with the springs active.
    - **(builder call) Seated coverage with the short skirt:**
      - The hem is not changed; the user wants the outfit kept exactly.

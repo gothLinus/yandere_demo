@@ -1925,10 +1925,11 @@ Phase D notes (they bind every Phase D task):
 - [ ] **Step 5: Run `bash yandere_demo/tests/run_all.sh`.** Expected: all pass.
 - [ ] **Step 6: Commit** `feat(assets): anime acting pass on the target animations`.
 
-### Task 23c: Clean secondary physics with a bounded skirt
+### Task 23c: Clean secondary physics with a lively, covered skirt
 
 **Files:**
-- Modify: `data/secondary_motion.tres`, `scripts/core/secondary_motion_tuning.gd` and `secondary_chain_setting.gd` (only if a limit field is added), `scripts/secondary_motion.gd`
+- Modify: `data/secondary_motion.tres`, `scripts/secondary_motion.gd`
+- Modify (only if Step 3 fails after tuning): `scripts/core/secondary_chain_setting.gd` (a lift-limit field)
 - Modify: the Task 15 R10 drift probe (it moves to the new chain names and runs with SecondaryMotion active)
 - Create: `tests/integration/target_skirt_coverage.tscn` + `.gd`
 - Test: `tests/unit/test_secondary_motion.gd`, the R10 probe, `target_skirt_coverage`
@@ -1938,7 +1939,7 @@ Phase D notes (they bind every Phase D task):
 - **Produces:**
   - Per-chain spring values for the hair clusters, ahoge, braid, braid bow, head bows, ribbons and skirt, each with explicit colliders (thigh, hip and chest capsules fitted to this body).
   - No spring on the `*_helper` bones.
-  - A hard per-chain lift limit for the skirt: a rotation limit field in `SecondaryChainSetting`, or a collider shell. The hem may lift but never past the coverage line.
+  - **No hard lift limit up front (user).** The coverage test decides whether one is needed (see Step 3).
   - The skirt is lively in walk, look_around, startled and the idles: hem lift is ≥ 0.03 m at peak.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -1950,13 +1951,12 @@ Phase D notes (they bind every Phase D task):
     - It asserts that every ray hits the skirt or legs first.
     - It also asserts the peak hem lift is ≥ 0.03 m in the standing clips.
   - Run them and confirm they fail with the 23a starting values.
-- [ ] **Step 2: Tune the data and add the lift limit.**
-  - Tuning changes go in `data/`.
-  - Any code change is limited to the limit field and its application.
+- [ ] **Step 2: Tune the data only.** All changes go in `data/secondary_motion.tres`. Do not add a lift limit.
 - [ ] **Step 3: Run the R10 probe and `target_skirt_coverage`.** Expected: PASS. Paste the drift and lift numbers in the report.
+  - If coverage still fails after tuning, add the smallest lift limit that makes it pass: a per-chain rotation limit in `SecondaryChainSetting` (default off), or a collider shell. Re-run, and report why tuning alone wasn't enough.
 - [ ] **Step 4: Visual pass.** Record a PNG sequence of walk with a sharp turn, startled and sit_down in `task-23c-shots/`. Expected: lively, with no popping or tunnelling.
 - [ ] **Step 5: Run `bash yandere_demo/tests/run_all.sh`.** Expected: all pass.
-- [ ] **Step 6: Commit** `feat(target): clean secondary physics with a bounded skirt`.
+- [ ] **Step 6: Commit** `feat(target): clean secondary physics with a lively, covered skirt`.
 
 ### Task 23d: Anime shading, expression polish, anti-goal checks and the user's sign-off
 
