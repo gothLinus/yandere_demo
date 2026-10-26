@@ -5,7 +5,8 @@ extends PanelContainer
 const SLIDE_SECONDS: float = 0.35
 const FREE_BLOCK_HOLD_SECONDS: float = 2.5
 const HIDDEN_Y: float = -120.0
-const SHOWN_Y: float = 24.0
+## Below the HUD's top row (heart, meters, clock), which would otherwise cover it.
+const SHOWN_Y: float = 176.0
 
 var _hold_seconds_left: float = 0.0
 var _is_counting_grace: bool = false

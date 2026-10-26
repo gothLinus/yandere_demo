@@ -6,6 +6,7 @@ const VIEWFINDER_SCENE: PackedScene = preload("res://scenes/ui/viewfinder.tscn")
 const GAME_OVER_SCENE: PackedScene = preload("res://scenes/ui/game_over.tscn")
 const MAIN_MENU_SCENE: PackedScene = preload("res://scenes/ui/main_menu.tscn")
 const TEST_SAVE_PATH: String = "user://test_save.json"
+const LAYOUT_WINDOW_SIZES: Array[Vector2i] = [Vector2i(1152, 648), Vector2i(1280, 720), Vector2i(1920, 1080)]
 
 
 func _ready() -> void:
@@ -44,6 +45,10 @@ func _run_scenario() -> String:
 	if vignette.intensity <= 0.4:
 		return "vignette intensity %.2f at sanity 20" % vignette.intensity
 
+	var layout_failure: String = await _layout_failure(hud, viewfinder)
+	if not layout_failure.is_empty():
+		return layout_failure
+
 	GameManager.game_over.emit(&"school_alert")
 	var reason_label: Label = game_over.get_node("%ReasonLabel")
 	if not reason_label.text.contains("principal"):
@@ -58,4 +63,45 @@ func _run_scenario() -> String:
 	var continue_button: Button = main_menu.get_node("%ContinueButton")
 	if not continue_button.disabled:
 		return "Continue is enabled without a save"
+	return ""
+
+
+## Seen in the Task 22 captures: the shown bell banner and the viewfinder corner brackets must clear the HUD's meters,
+## clock and item slot, at the default window size and at common larger ones (the UI does not scale).
+func _layout_failure(hud: Control, viewfinder: Control) -> String:
+	var window: Window = get_tree().root
+	var previous_size: Vector2i = window.size
+	var item_slot: Control = hud.get_node("%ItemSlot")
+	item_slot.visible = true
+	var failure: String = ""
+	for window_size: Vector2i in LAYOUT_WINDOW_SIZES:
+		window.size = window_size
+		await get_tree().process_frame
+		await get_tree().process_frame
+		failure = _overlap_failure(hud, viewfinder, item_slot)
+		if not failure.is_empty():
+			failure = "at %s: %s" % [window_size, failure]
+			break
+	item_slot.visible = false
+	window.size = previous_size
+	return failure
+
+
+func _overlap_failure(hud: Control, viewfinder: Control, item_slot: Control) -> String:
+	var panels: Dictionary = {
+		"meters": (hud.get_node("TopLeft") as Control).get_global_rect(),
+		"clock": (hud.get_node("ClockPanel") as Control).get_global_rect(),
+		"item slot": item_slot.get_global_rect(),
+	}
+	var banner: Control = hud.get_node("BellBanner")
+	var banner_rect: Rect2 = Rect2(Vector2(banner.global_position.x, banner.get(&"SHOWN_Y")), banner.size)
+	for panel_name: String in panels:
+		if banner_rect.intersects(panels[panel_name]):
+			return "the shown bell banner %s overlaps the %s %s" % [banner_rect, panel_name, panels[panel_name]]
+	panels["viewfinder readout"] = (viewfinder.get_node("Readout") as Control).get_global_rect()
+	for leg: PackedVector2Array in viewfinder.call(&"bracket_legs"):
+		var leg_rect: Rect2 = Rect2(leg[0], Vector2.ZERO).expand(leg[1]).grow(viewfinder.get(&"BRACKET_WIDTH"))
+		for panel_name: String in panels:
+			if leg_rect.intersects(panels[panel_name]):
+				return "a viewfinder bracket %s overlaps the %s %s" % [leg_rect, panel_name, panels[panel_name]]
 	return ""

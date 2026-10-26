@@ -9,6 +9,10 @@ const GOOD_FOCUS_SCORE: int = 60
 const FLASH_SECONDS: float = 0.12
 const DESATURATE_SECONDS: float = 0.4
 const BRACKET_MARGIN: float = 56.0
+## The HUD stays up in camera mode: the top corners sit below its heart, meters and clock row, the bottom ones above
+## the carried-item slot.
+const BRACKET_MARGIN_TOP: float = 184.0
+const BRACKET_MARGIN_BOTTOM: float = 104.0
 const BRACKET_LENGTH: float = 64.0
 const BRACKET_WIDTH: float = 4.0
 const RETICLE_RADIUS: float = 26.0
@@ -44,19 +48,27 @@ func _ready() -> void:
 
 
 func _draw() -> void:
-	var corner_directions: Array[Vector2] = [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]
-	for direction: Vector2 in corner_directions:
-		var corner: Vector2 = Vector2(
-			BRACKET_MARGIN if direction.x > 0.0 else size.x - BRACKET_MARGIN,
-			BRACKET_MARGIN if direction.y > 0.0 else size.y - BRACKET_MARGIN,
-		)
-		draw_line(corner, corner + Vector2(BRACKET_LENGTH * direction.x, 0.0), BRACKET_COLOR, BRACKET_WIDTH)
-		draw_line(corner, corner + Vector2(0.0, BRACKET_LENGTH * direction.y), BRACKET_COLOR, BRACKET_WIDTH)
+	for leg: PackedVector2Array in bracket_legs():
+		draw_line(leg[0], leg[1], BRACKET_COLOR, BRACKET_WIDTH)
 	var center: Vector2 = size * 0.5
 	var reticle_color: Color = GOOD_COLOR if is_focus_good() else IDLE_COLOR
 	draw_arc(center, RETICLE_RADIUS, 0.0, TAU, 40, reticle_color, 3.0)
 	for direction: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
 		draw_line(center + direction * RETICLE_GAP, center + direction * (RETICLE_RADIUS + RETICLE_GAP), reticle_color, 3.0)
+
+
+## The two lines of each frame corner, as [from, to] pairs.
+func bracket_legs() -> Array[PackedVector2Array]:
+	var legs: Array[PackedVector2Array] = []
+	var corner_directions: Array[Vector2] = [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]
+	for direction: Vector2 in corner_directions:
+		var corner: Vector2 = Vector2(
+			BRACKET_MARGIN if direction.x > 0.0 else size.x - BRACKET_MARGIN,
+			BRACKET_MARGIN_TOP if direction.y > 0.0 else size.y - BRACKET_MARGIN_BOTTOM,
+		)
+		legs.append(PackedVector2Array([corner, corner + Vector2(BRACKET_LENGTH * direction.x, 0.0)]))
+		legs.append(PackedVector2Array([corner, corner + Vector2(0.0, BRACKET_LENGTH * direction.y)]))
+	return legs
 
 
 func is_focus_good() -> bool:
