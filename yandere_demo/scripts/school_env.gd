@@ -10,6 +10,9 @@ const HIDE_LOCKER_SCENE: PackedScene = preload("res://scenes/props/hide_locker.t
 const HIDE_DESK_SCENE: PackedScene = preload("res://scenes/props/hide_desk.tscn")
 const CLASS_SEAT_SCENE: PackedScene = preload("res://scenes/props/class_seat.tscn")
 const STASH_LOCKER_SCENE: PackedScene = preload("res://scenes/props/stash_locker.tscn")
+const CHERRY_FOLIAGE_PREFIX: String = "CherryFoliage_"
+## A crown this close (horizontally) to the scene's own Petals emitter already has petals.
+const PETAL_TREE_RADIUS: float = 1.5
 
 @export var daylight_profile: DaylightProfile = preload("res://data/daylight_profile.tres")
 
@@ -20,12 +23,14 @@ var _markers: Dictionary = {}
 @onready var _school: Node3D = $School
 @onready var _navigation_region: NavigationRegion3D = $NavigationRegion3D
 @onready var _sun: DirectionalLight3D = $Sun
+@onready var _petals: GPUParticles3D = $Petals
 
 
 func _ready() -> void:
 	_school.reparent(_navigation_region, false)
 	_index_markers()
 	_spawn_interactables()
+	_spawn_petals()
 	var navigation_mesh: NavigationMesh = _navigation_region.navigation_mesh
 	var map: RID = _navigation_region.get_navigation_map()
 	NavigationServer3D.map_set_cell_size(map, navigation_mesh.cell_size)
@@ -120,6 +125,23 @@ func _spawn_interactables() -> void:
 	var seat: ClassSeat = _place(CLASS_SEAT_SCENE, marker("PlayerSeat")) as ClassSeat
 	seat.is_player_seat = true
 	_place(STASH_LOCKER_SCENE, marker("StashLocker"))
+
+
+## The scene's Petals emitter (which the cherry-tree ending moves) covers one tree; every other crown gets a copy.
+func _spawn_petals() -> void:
+	for foliage_node: Node3D in markers_with_prefix(CHERRY_FOLIAGE_PREFIX):
+		var foliage: MeshInstance3D = foliage_node as MeshInstance3D
+		if foliage == null:
+			continue
+		var crown: Vector3 = foliage.global_transform * foliage.get_aabb().get_center()
+		var emitter_position: Vector3 = Vector3(crown.x, _petals.global_position.y, crown.z)
+		var offset: Vector3 = emitter_position - _petals.global_position
+		if Vector2(offset.x, offset.z).length() <= PETAL_TREE_RADIUS:
+			continue
+		var emitter: GPUParticles3D = _petals.duplicate() as GPUParticles3D
+		emitter.name = "Petals_%s" % String(foliage.name).trim_prefix(CHERRY_FOLIAGE_PREFIX)
+		add_child(emitter)
+		emitter.global_position = emitter_position
 
 
 func _place(scene: PackedScene, anchor: Node3D) -> Node3D:
