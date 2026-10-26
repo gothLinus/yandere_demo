@@ -380,7 +380,9 @@ func _build_animation_tree() -> void:
 	machine.add_node(STATE_SIT_DOWN, _animation_node(&"player_sit_down"), Vector2(250.0, 100.0))
 	machine.add_node(STATE_SIT, _animation_node(&"player_sit"), Vector2(500.0, 100.0))
 	machine.add_node(STATE_STAND_UP, _animation_node(&"player_stand_up"), Vector2(250.0, 200.0))
-	machine.add_transition(&"Start", STATE_LOCOMOTION, AnimationNodeStateMachineTransition.new())
+	var start_transition: AnimationNodeStateMachineTransition = AnimationNodeStateMachineTransition.new()
+	start_transition.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
+	machine.add_transition(&"Start", STATE_LOCOMOTION, start_transition)
 	for state: StringName in [STATE_PHOTO, STATE_HIDE, STATE_SIT_DOWN]:
 		machine.add_transition(STATE_LOCOMOTION, state, _transition())
 		machine.add_transition(state, STATE_LOCOMOTION, _transition())

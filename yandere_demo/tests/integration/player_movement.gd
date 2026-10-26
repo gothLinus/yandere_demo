@@ -28,6 +28,10 @@ func _ready() -> void:
 	player.global_transform = school_env.marker("PlayerSpawn").global_transform
 	await get_tree().physics_frame
 	await get_tree().physics_frame
+	var start_playback: AnimationNodeStateMachinePlayback = (player.get_node("AnimationTree") as AnimationTree).get("parameters/playback")
+	if start_playback.get_current_node() != StealthPlayer.STATE_LOCOMOTION:
+		fail_test("a fresh player is not in locomotion but %s, so the model stands in its rest pose" % start_playback.get_current_node())
+		return
 	player.noise_made.connect(func(_position: Vector3, stance: GameTypes.Stance) -> void: _noise_stances.append(stance))
 	player.interact_prompt_changed.connect(func(text: String) -> void: _prompts.append(text))
 	if not await _line_of_sight_ignores_characters(player):
