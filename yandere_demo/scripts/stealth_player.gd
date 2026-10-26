@@ -197,6 +197,10 @@ func drop_carried() -> StringName:
 	return dropped
 
 
+func current_camera() -> Camera3D:
+	return _camera_rig.current_camera()
+
+
 func head_position() -> Vector3:
 	var height: float = lerpf(STAND_HEIGHT, CROUCH_HEIGHT, _crouch_blend)
 	return global_position + Vector3.UP * (height - tuning.eye_below_top)
