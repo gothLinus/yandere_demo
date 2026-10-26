@@ -11,6 +11,7 @@ signal week_completed(ending_id: StringName)
 signal intel_unlocked(card: IntelCard)
 
 const MAIN_SCENE_PATH: String = "res://scenes/main.tscn"
+const ENDING_SCENE_PATH: String = "res://scenes/ending.tscn"
 const TEST_SAVE_PATH: String = "user://test_save.json"
 const PLAYER_GROUP: StringName = &"player"
 const TARGET_GROUP: StringName = &"target"
@@ -284,9 +285,19 @@ func _on_minute_ticked(minute: float) -> void:
 
 
 func _on_node_added(node: Node) -> void:
+	var day_summary: DaySummary = node as DaySummary
+	if day_summary != null:
+		day_summary.ending_requested.connect(_on_ending_requested)
 	var pickup: ItemPickup = node as ItemPickup
 	if pickup != null:
 		pickup.picked.connect(_on_item_picked)
+
+
+## The final DaySummary hands over here (ruling R26): week_completed itself never changes the scene.
+func _on_ending_requested(ending_id: StringName) -> void:
+	get_tree().change_scene_to_file(ENDING_SCENE_PATH)
+	await get_tree().scene_changed
+	(get_tree().current_scene as EndingDirector).play(ending_id, progress)
 
 
 func _on_item_picked(item_id: StringName) -> void:
