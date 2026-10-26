@@ -2,8 +2,6 @@ class_name SanityHeart
 extends TextureProgressBar
 ## Sanity as a ring with a beating heart inside. Everything is drawn here, so no texture asset is needed.
 
-const BASE_BPM: float = 60.0
-const BPM_PER_LOST_SANITY: float = 0.8
 const RING_WIDTH: float = 7.0
 const HEART_POINT_COUNT: int = 48
 const HEART_RADIUS_RATIO: float = 0.36
@@ -14,10 +12,6 @@ const RING_BACKGROUND_COLOR: Color = Color("1a1020cc")
 
 var _beat_phase: float = 0.0
 var _heart_outline: PackedVector2Array = _build_heart_outline()
-
-
-static func beats_per_minute(sanity: float) -> float:
-	return BASE_BPM + (100.0 - sanity) * BPM_PER_LOST_SANITY
 
 
 ## The classic parametric heart, normalised to a unit box.
@@ -41,7 +35,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	_beat_phase = fposmod(_beat_phase + delta * beats_per_minute(value) / 60.0, 1.0)
+	_beat_phase = fposmod(_beat_phase + delta * UiFormulas.beats_per_minute(value) / 60.0, 1.0)
 	queue_redraw()
 
 

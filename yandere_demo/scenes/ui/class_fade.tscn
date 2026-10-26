@@ -1,0 +1,49 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Theme" path="res://scripts/ui/ui_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/ui/class_fade.gd" id="2_script"]
+[ext_resource type="Script" path="res://scripts/ui/clock_face.gd" id="3_face"]
+
+[node name="ClassFade" type="CanvasLayer"]
+layer = 50
+script = ExtResource("2_script")
+
+[node name="Curtain" type="ColorRect" parent="."]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0)
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("1_theme")
+color = Color(0.05, 0.02, 0.07, 1)
+
+[node name="Center" type="CenterContainer" parent="Curtain"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Content" type="VBoxContainer" parent="Curtain/Center"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="ClockFace" type="Control" parent="Curtain/Center/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 140)
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("3_face")
+
+[node name="ClockLabel" type="Label" parent="Curtain/Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "08:30"
+horizontal_alignment = 1

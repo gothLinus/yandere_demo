@@ -1,10 +1,17 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/school_env.tscn" id="1_school_env"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2_player"]
 [ext_resource type="PackedScene" path="res://scenes/target.tscn" id="3_target"]
 [ext_resource type="PackedScene" path="res://scenes/teacher.tscn" id="4_teacher"]
 [ext_resource type="Script" path="res://scripts/crowd_spawner.gd" id="5_crowd"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="ui_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/viewfinder.tscn" id="ui_viewfinder"]
+[ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="ui_pause_menu"]
+[ext_resource type="PackedScene" path="res://scenes/ui/album.tscn" id="ui_album"]
+[ext_resource type="PackedScene" path="res://scenes/ui/day_summary.tscn" id="ui_day_summary"]
+[ext_resource type="PackedScene" path="res://scenes/ui/game_over.tscn" id="ui_game_over"]
+[ext_resource type="PackedScene" path="res://scenes/ui/class_fade.tscn" id="ui_class_fade"]
 
 [node name="Main" type="Node3D"]
 
@@ -21,3 +28,17 @@ script = ExtResource("5_crowd")
 
 [node name="UI" type="CanvasLayer" parent="."]
 layer = 20
+
+[node name="Hud" parent="UI" instance=ExtResource("ui_hud")]
+
+[node name="Viewfinder" parent="UI" instance=ExtResource("ui_viewfinder")]
+
+[node name="PauseMenu" parent="UI" instance=ExtResource("ui_pause_menu")]
+
+[node name="Album" parent="UI" instance=ExtResource("ui_album")]
+
+[node name="DaySummary" parent="UI" instance=ExtResource("ui_day_summary")]
+
+[node name="GameOver" parent="UI" instance=ExtResource("ui_game_over")]
+
+[node name="ClassFade" parent="UI" instance=ExtResource("ui_class_fade")]
