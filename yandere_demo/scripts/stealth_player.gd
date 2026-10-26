@@ -207,9 +207,11 @@ func head_position() -> Vector3:
 
 
 func is_watching(target_head: Vector3, space: PhysicsDirectSpaceState3D, max_distance: float) -> bool:
-	if not _camera_rig.current_camera().is_position_in_frustum(target_head):
+	var camera: Camera3D = _camera_rig.current_camera()
+	if not camera.is_position_in_frustum(target_head):
 		return false
-	var origin: Vector3 = head_position()
+	# Hidden, the player sees through the peek view; under a desk the standing head would look over the desks.
+	var origin: Vector3 = camera.global_position if mode == MODE_HIDDEN else head_position()
 	if origin.distance_to(target_head) > max_distance:
 		return false
 	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, target_head, PhysicsLayers.LINE_OF_SIGHT_MASK, [get_rid()])
