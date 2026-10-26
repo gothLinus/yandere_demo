@@ -3,21 +3,11 @@ extends Node3D
 
 signal navigation_ready()
 
-const MORNING_MINUTE: float = 420.0
-const NOON_MINUTE: float = 720.0
-const EVENING_MINUTE: float = 1050.0
-const MORNING_COLOR: Color = Color(1.0, 0.95, 0.86)
-const NOON_COLOR: Color = Color(1.0, 1.0, 1.0)
-const EVENING_COLOR: Color = Color("ffb070")
-const MORNING_ENERGY: float = 1.2
-const NOON_ENERGY: float = 1.0
-const EVENING_ENERGY: float = 0.8
-const MORNING_PITCH_DEGREES: float = -35.0
-const NOON_PITCH_DEGREES: float = -65.0
-const EVENING_PITCH_DEGREES: float = -18.0
-const SUN_YAW_DEGREES: float = -30.0
+const MAX_SYNC_FRAMES: int = 300
 const MAP_SYNC_TOLERANCE: float = 0.5
 const VOLUME_HALF_EXTENT_LIMIT: float = 1.0
+
+@export var daylight_profile: DaylightProfile = preload("res://data/daylight_profile.tres")
 
 var _markers: Dictionary = {}
 
@@ -33,13 +23,20 @@ func _ready() -> void:
 	var map: RID = _navigation_region.get_navigation_map()
 	NavigationServer3D.map_set_cell_size(map, navigation_mesh.cell_size)
 	NavigationServer3D.map_set_cell_height(map, navigation_mesh.cell_height)
+	set_daylight(daylight_profile.morning_minute)
 	_navigation_region.bake_navigation_mesh(false)
 	await get_tree().physics_frame
-	var baked_vertex: Vector3 = navigation_mesh.get_vertices()[0]
-	while not _map_contains(map, baked_vertex):
-		await get_tree().physics_frame
+	var vertices: PackedVector3Array = navigation_mesh.get_vertices()
+	if vertices.is_empty():
+		push_error("SchoolEnv: navigation bake produced no vertices")
+	else:
+		var waited_frames: int = 0
+		while not _map_contains(map, vertices[0]) and waited_frames < MAX_SYNC_FRAMES:
+			await get_tree().physics_frame
+			waited_frames += 1
+		if waited_frames >= MAX_SYNC_FRAMES:
+			push_error("SchoolEnv: navigation map did not sync within %d frames" % MAX_SYNC_FRAMES)
 	navigation_ready.emit()
-	set_daylight(MORNING_MINUTE)
 
 
 func marker(marker_name: String) -> Node3D:
@@ -91,19 +88,7 @@ func navigation_map() -> RID:
 
 
 func set_daylight(minute: float) -> void:
-	var morning_to_noon: bool = minute < NOON_MINUTE
-	var from_minute: float = MORNING_MINUTE if morning_to_noon else NOON_MINUTE
-	var to_minute: float = NOON_MINUTE if morning_to_noon else EVENING_MINUTE
-	var weight: float = clampf(inverse_lerp(from_minute, to_minute, minute), 0.0, 1.0)
-	var from_color: Color = MORNING_COLOR if morning_to_noon else NOON_COLOR
-	var to_color: Color = NOON_COLOR if morning_to_noon else EVENING_COLOR
-	var from_energy: float = MORNING_ENERGY if morning_to_noon else NOON_ENERGY
-	var to_energy: float = NOON_ENERGY if morning_to_noon else EVENING_ENERGY
-	var from_pitch: float = MORNING_PITCH_DEGREES if morning_to_noon else NOON_PITCH_DEGREES
-	var to_pitch: float = NOON_PITCH_DEGREES if morning_to_noon else EVENING_PITCH_DEGREES
-	_sun.light_color = from_color.lerp(to_color, weight)
-	_sun.light_energy = lerpf(from_energy, to_energy, weight)
-	_sun.rotation_degrees = Vector3(lerpf(from_pitch, to_pitch, weight), SUN_YAW_DEGREES, 0.0)
+	daylight_profile.apply_to(_sun, minute)
 
 
 func _map_contains(map: RID, point: Vector3) -> bool:

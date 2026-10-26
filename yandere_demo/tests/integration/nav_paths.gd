@@ -23,6 +23,10 @@ func _ready() -> void:
 	var school_env: SchoolEnv = school_scene.instantiate() as SchoolEnv
 	add_child(school_env)
 	await school_env.navigation_ready
+	var morning_sun: DirectionalLight3D = school_env.get_node("Sun") as DirectionalLight3D
+	if not is_equal_approx(morning_sun.light_energy, 1.2):
+		fail_test("morning daylight not applied before navigation_ready")
+		return
 	var map: RID = school_env.navigation_map()
 	for route: Dictionary in _routes:
 		var origin: Vector3 = school_env.marker(route["from"]).global_position
