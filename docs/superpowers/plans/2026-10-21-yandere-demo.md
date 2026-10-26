@@ -1929,7 +1929,6 @@ Phase D notes (they bind every Phase D task):
 
 **Files:**
 - Modify: `data/secondary_motion.tres`, `scripts/secondary_motion.gd`
-- Modify (only if Step 3 fails after tuning): `scripts/core/secondary_chain_setting.gd` (a lift-limit field)
 - Modify: the Task 15 R10 drift probe (it moves to the new chain names and runs with SecondaryMotion active)
 - Create: `tests/integration/target_skirt_coverage.tscn` + `.gd`
 - Test: `tests/unit/test_secondary_motion.gd`, the R10 probe, `target_skirt_coverage`
@@ -1939,7 +1938,7 @@ Phase D notes (they bind every Phase D task):
 - **Produces:**
   - Per-chain spring values for the hair clusters, ahoge, braid, braid bow, head bows, ribbons and skirt, each with explicit colliders (thigh, hip and chest capsules fitted to this body).
   - No spring on the `*_helper` bones.
-  - **No hard lift limit up front (user).** The coverage test decides whether one is needed (see Step 3).
+  - **Never a hard lift limit (user).** The skirt's coverage comes from spring tuning alone.
   - The skirt is lively in walk, look_around, startled and the idles: hem lift is ≥ 0.03 m at peak.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -1953,7 +1952,7 @@ Phase D notes (they bind every Phase D task):
   - Run them and confirm they fail with the 23a starting values.
 - [ ] **Step 2: Tune the data only.** All changes go in `data/secondary_motion.tres`. Do not add a lift limit.
 - [ ] **Step 3: Run the R10 probe and `target_skirt_coverage`.** Expected: PASS. Paste the drift and lift numbers in the report.
-  - If coverage still fails after tuning, add the smallest lift limit that makes it pass: a per-chain rotation limit in `SecondaryChainSetting` (default off), or a collider shell. Re-run, and report why tuning alone wasn't enough.
+  - If coverage still fails after tuning, stop and report BLOCKED with the failing clips, the camera positions and the numbers. The controller asks the user what to do. Do not add a limit.
 - [ ] **Step 4: Visual pass.** Record a PNG sequence of walk with a sharp turn, startled and sit_down in `task-23c-shots/`. Expected: lively, with no popping or tunnelling.
 - [ ] **Step 5: Run `bash yandere_demo/tests/run_all.sh`.** Expected: all pass.
 - [ ] **Step 6: Commit** `feat(target): clean secondary physics with a lively, covered skirt`.
