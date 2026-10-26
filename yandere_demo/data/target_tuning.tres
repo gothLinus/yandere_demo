@@ -27,3 +27,7 @@ class_locker_max_items = 2
 blink_min_seconds = 2.0
 blink_max_seconds = 6.0
 blink_seconds = 0.15
+notice_pause_seconds = 2.5
+calm_speed_scale = 0.85
+calm_slow_seconds = 20.0
+hearing_turn_seconds = 1.5

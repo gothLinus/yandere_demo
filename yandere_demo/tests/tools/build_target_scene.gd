@@ -1,6 +1,7 @@
 extends SceneTree
-## Builds scenes/target.tscn: the node tree from the Task 15 brief plus the AnimationTree state machine (a state per
-## target clip, `locomotion` and `check_phone`, every state joined to every other by one shared 0.3 s crossfade).
+## Builds scenes/target.tscn: the node tree from the Task 15 brief plus Task 16's TargetPerception, and the
+## AnimationTree state machine (a state per target clip, `locomotion` and `check_phone`, every state joined to every
+## other by one shared 0.3 s crossfade).
 ## godot-mcp cannot instance the glb or build animation resources, so the scene is packed here instead.
 ## Run: godot --headless --path yandere_demo --script res://tests/tools/build_target_scene.gd
 
@@ -78,6 +79,11 @@ func _initialize() -> void:
 	props.set_script(load("res://scripts/target_props.gd"))
 	props.set("skeleton_path", SKELETON_PATH)
 	_add(root, root, props)
+
+	var perception: Node = Node.new()
+	perception.name = "TargetPerception"
+	perception.set_script(load("res://scripts/target_perception.gd"))
+	_add(root, root, perception)
 
 	var eye_point: Marker3D = Marker3D.new()
 	eye_point.name = "EyePoint"

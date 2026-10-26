@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/secondary_motion.gd" id="5_5y858"]
 [ext_resource type="Resource" path="res://data/secondary_motion.tres" id="6_nh6ro"]
 [ext_resource type="Script" path="res://scripts/target_props.gd" id="7_x43rt"]
+[ext_resource type="Script" path="res://scripts/target_perception.gd" id="8_perception"]
 
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_p5dkw"]
 animation = &"target_idle"
@@ -195,6 +196,9 @@ skeleton_path = NodePath("../Model/TargetChar/Skeleton3D")
 [node name="TargetProps" type="Node" parent="." unique_id=633877616]
 script = ExtResource("7_x43rt")
 skeleton_path = NodePath("../Model/TargetChar/Skeleton3D")
+
+[node name="TargetPerception" type="Node" parent="." unique_id=840639244]
+script = ExtResource("8_perception")
 
 [node name="EyePoint" type="Marker3D" parent="." unique_id=1368505954]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.45, 0)

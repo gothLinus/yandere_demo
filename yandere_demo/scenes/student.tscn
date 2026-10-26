@@ -1,0 +1,12 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/student_ai.gd" id="1_student"]
+
+[node name="Student" type="CharacterBody3D"]
+script = ExtResource("1_student")
+
+[node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
+path_desired_distance = 0.5
+target_desired_distance = 0.3
+avoidance_enabled = true
+radius = 0.3

@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="CastTuning" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/cast_tuning.gd" id="1_tuning"]
+
+[resource]
+script = ExtResource("1_tuning")
+walk_speed = 1.2
+turn_rate = 8.0
+acceleration = 2.5
+arrive_distance = 0.3
+seated_arrive_distance = 0.8
+glide_min_seconds = 0.4
+glide_max_speed = 1.2
+stuck_seconds = 5.0
+stuck_speed = 0.1
+teacher_look_around_seconds = 4.0
+teacher_look_around_every = 3
+camera_at_student_range = 15.0
+student_spot_min_seconds = 20.0
+student_spot_max_seconds = 60.0
+student_spot_animations = Array[StringName]([&"student_idle", &"student_chat"])
+witness_range = 10.0
+witness_fov_degrees = 120.0
+witness_cooldown_seconds = 20.0
+female_uniform_colors = Array[Color]([Color(0.22, 0.36, 0.28, 1), Color(0.45, 0.44, 0.47, 1), Color(0.55, 0.42, 0.3, 1), Color(0.4, 0.27, 0.42, 1)])
+female_neckerchief_colors = Array[Color]([Color(0.86, 0.69, 0.28, 1), Color(0.18, 0.52, 0.55, 1), Color(0.2, 0.4, 0.3, 1), Color(0.5, 0.7, 0.88, 1)])
+male_uniform_colors = Array[Color]([Color(0.12, 0.14, 0.2, 1), Color(0.1, 0.1, 0.11, 1), Color(0.26, 0.27, 0.3, 1), Color(0.22, 0.25, 0.18, 1)])
+hair_colors = Array[Color]([Color(0.07, 0.06, 0.07, 1), Color(0.17, 0.14, 0.13, 1), Color(0.35, 0.24, 0.18, 1), Color(0.45, 0.26, 0.15, 1), Color(0.62, 0.5, 0.32, 1)])
+hair_shade_ratio = 0.68

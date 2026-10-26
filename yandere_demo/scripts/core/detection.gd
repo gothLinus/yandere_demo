@@ -14,8 +14,7 @@ static func is_in_view_cone(origin: Vector3, forward: Vector3, point: Vector3, f
 
 
 static func has_line_of_sight(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, exclude: Array[RID]) -> bool:
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to)
-	query.exclude = exclude
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to, PhysicsLayers.LINE_OF_SIGHT_MASK, exclude)
 	var result: Dictionary = space.intersect_ray(query)
 	return result.is_empty()
 

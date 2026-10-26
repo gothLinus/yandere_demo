@@ -39,3 +39,10 @@ extends Resource
 @export var blink_min_seconds: float = 2.0
 @export var blink_max_seconds: float = 6.0
 @export var blink_seconds: float = 0.15
+## After noticing the player he pauses this long, then turns SUSPICIOUS.
+@export var notice_pause_seconds: float = 2.5
+## Calming down resumes his plan at this walking-speed scale for `calm_slow_seconds`.
+@export var calm_speed_scale: float = 0.85
+@export var calm_slow_seconds: float = 20.0
+## A heard footstep turns his head toward it for this long, with no Suspicion.
+@export var hearing_turn_seconds: float = 1.5
