@@ -60,7 +60,7 @@ static func _convert_instance(instance: MeshInstance3D, outline_width: float, wa
 		if standard == null:
 			continue
 		var is_glass: bool = allows_glass and _is_glass(standard)
-		var converted: ShaderMaterial = _make_glass_material(standard) if is_glass else _make_toon_material(standard)
+		var converted: ShaderMaterial = _make_glass_material(standard) if is_glass else make_toon_material(standard)
 		if not is_glass and wants_outline.call(standard.resource_name):
 			converted.next_pass = _make_outline_material(outline_width)
 		mesh.surface_set_material(surface_index, converted)
@@ -68,7 +68,7 @@ static func _convert_instance(instance: MeshInstance3D, outline_width: float, wa
 			instance.set_surface_override_material(surface_index, null)
 
 
-static func _make_toon_material(source: BaseMaterial3D) -> ShaderMaterial:
+static func make_toon_material(source: BaseMaterial3D) -> ShaderMaterial:
 	var material: ShaderMaterial = ShaderMaterial.new()
 	material.resource_name = source.resource_name
 	material.set_shader_parameter("albedo_color", source.albedo_color)

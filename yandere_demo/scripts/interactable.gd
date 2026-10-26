@@ -1,11 +1,8 @@
 class_name Interactable
 extends Area3D
 
-const COLLISION_LAYER_BIT: int = 4
-
-
 func _init() -> void:
-	collision_layer = COLLISION_LAYER_BIT
+	collision_layer = PhysicsLayers.INTERACTABLE
 	collision_mask = 0
 
 

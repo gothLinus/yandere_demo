@@ -1,14 +1,13 @@
 class_name PlayerCameraRig
 extends Node3D
 
-const MOUSE_SENSITIVITY: float = 0.0025
 const PITCH_LIMIT: float = deg_to_rad(70.0)
 const VIEWFINDER_FOV_WIDE: float = 50.0
 const VIEWFINDER_FOV_TELE: float = 20.0
-const ZOOM_STEP: float = 3.0
 const SHAKE_FREQUENCY: float = 40.0
 const SHAKE_OFFSET_SCALE: float = 0.05
 
+var tuning: StealthTuning = preload("res://data/stealth_tuning.tres")
 var yaw: float = 0.0
 var pitch: float = deg_to_rad(-10.0)
 var shake_strength: float = 0.0
@@ -23,6 +22,7 @@ var _shake_noise: FastNoiseLite = FastNoiseLite.new()
 
 
 func _ready() -> void:
+	_spring_arm.collision_mask = PhysicsLayers.WORLD
 	_viewfinder_camera.fov = VIEWFINDER_FOV_WIDE
 	_third_person_camera.make_current()
 	if DisplayServer.get_name() != "headless":
@@ -34,15 +34,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var motion: InputEventMouseMotion = event as InputEventMouseMotion
 	if motion != null:
-		yaw -= motion.relative.x * MOUSE_SENSITIVITY
-		pitch = clampf(pitch - motion.relative.y * MOUSE_SENSITIVITY, -PITCH_LIMIT, PITCH_LIMIT)
+		yaw -= motion.relative.x * tuning.mouse_sensitivity
+		pitch = clampf(pitch - motion.relative.y * tuning.mouse_sensitivity, -PITCH_LIMIT, PITCH_LIMIT)
 		return
 	var button: InputEventMouseButton = event as InputEventMouseButton
 	if button != null and button.pressed and _viewfinder_active:
 		if button.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_zoom(-ZOOM_STEP)
+			_zoom(-tuning.zoom_step)
 		elif button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom(ZOOM_STEP)
+			_zoom(tuning.zoom_step)
 
 
 func _process(_delta: float) -> void:

@@ -84,3 +84,9 @@ func test_speeds() -> void:
 	player.low_sanity_slow = false
 	player.is_vision_active = true
 	assert_near(player.move_speed(), StealthPlayer.SNEAK_SPEED * StealthPlayer.VISION_SPEED_MULTIPLIER, 0.0001)
+
+
+func test_line_of_sight_ignores_character_bodies() -> void:
+	var blocking_layers: int = PhysicsLayers.PLAYER | PhysicsLayers.INTERACTABLE | PhysicsLayers.CHARACTERS
+	assert_eq(PhysicsLayers.LINE_OF_SIGHT_MASK & blocking_layers, 0, "sight rays see only the world")
+	assert_eq(player.collision_layer, PhysicsLayers.PLAYER)

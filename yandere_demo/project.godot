@@ -81,6 +81,13 @@ pause={
 ]
 }
 
+[layer_names]
+
+3d_physics/layer_1="world"
+3d_physics/layer_2="player"
+3d_physics/layer_3="interactable"
+3d_physics/layer_4="characters"
+
 [physics]
 
 common/physics_ticks_per_second=60

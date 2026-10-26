@@ -55,3 +55,7 @@ extends Resource
 @export var no_hide_sanity_threshold: float = 10.0
 @export var sneak_speed_low_sanity_multiplier: float = 0.75
 @export var footstep_stride_meters: float = 0.9
+@export var crouch_blend_rate: float = 6.0
+@export var eye_below_top: float = 0.1
+@export var mouse_sensitivity: float = 0.0025
+@export var zoom_step: float = 3.0

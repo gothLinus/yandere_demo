@@ -30,6 +30,8 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	player.noise_made.connect(func(_position: Vector3, stance: GameTypes.Stance) -> void: _noise_stances.append(stance))
 	player.interact_prompt_changed.connect(func(text: String) -> void: _prompts.append(text))
+	if not await _line_of_sight_ignores_characters(player):
+		return
 	var start: Vector3 = player.global_position
 
 	Input.action_press("move_forward")
@@ -74,10 +76,10 @@ func _ready() -> void:
 		fail_test("interact prompt not announced exactly once: %s" % [_prompts])
 		return
 
-	if not player.enter_camera_mode():
-		fail_test("camera mode refused")
+	var camera_failure: String = await _camera_mode_failure(player)
+	if not camera_failure.is_empty():
+		fail_test(camera_failure)
 		return
-	await get_tree().create_timer(0.5).timeout
 	var playback: AnimationNodeStateMachinePlayback = (player.get_node("AnimationTree") as AnimationTree).get("parameters/playback")
 	var prop: Node3D = player.find_child("CameraProp", true, false) as Node3D
 	if playback.get_current_node() != &"photo" or prop == null or not prop.is_visible_in_tree():
@@ -88,3 +90,57 @@ func _ready() -> void:
 		fail_test("camera prop still visible outside camera mode")
 		return
 	pass_test()
+
+
+func _line_of_sight_ignores_characters(player: StealthPlayer) -> bool:
+	var target_head: Vector3 = player.head_position() + Vector3(0.0, 0.0, -1.5)
+	var character_body: StaticBody3D = _body_at(target_head, PhysicsLayers.CHARACTERS, Vector3.ONE * 0.5)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var space: PhysicsDirectSpaceState3D = player.get_world_3d().direct_space_state
+	if not player.is_watching(target_head, space, 10.0):
+		fail_test("a character-layer body around the target head blocked the line of sight")
+		return false
+	var wall: StaticBody3D = _body_at(target_head + Vector3(0.0, 0.0, 0.75), PhysicsLayers.WORLD, Vector3(2.0, 2.0, 0.1))
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	if player.is_watching(target_head, space, 10.0):
+		fail_test("a world wall did not block the line of sight")
+		return false
+	character_body.queue_free()
+	wall.queue_free()
+	return true
+
+
+func _body_at(position: Vector3, layer: int, size: Vector3) -> StaticBody3D:
+	var body: StaticBody3D = StaticBody3D.new()
+	body.collision_layer = layer
+	var box: CollisionShape3D = CollisionShape3D.new()
+	var shape: BoxShape3D = BoxShape3D.new()
+	shape.size = size
+	box.shape = shape
+	body.add_child(box)
+	add_child(body)
+	body.global_position = position
+	return body
+
+
+func _camera_mode_failure(player: StealthPlayer) -> String:
+	if player.stance != GameTypes.Stance.SNEAK:
+		return "player should still be crouched before the camera test"
+	if not player.enter_camera_mode():
+		return "camera mode refused"
+	await get_tree().create_timer(0.5).timeout
+	if player.stance != GameTypes.Stance.WALK:
+		return "camera mode kept stance %d" % player.stance
+	var shape_node: CharacterBodyShape = player.get_node("CharacterBodyShape") as CharacterBodyShape
+	if shape_node.height() < 1.5:
+		return "camera mode kept the crouched collision (%.2f m)" % shape_node.height()
+	var viewfinder: Camera3D = player.get_node("CameraRig/ViewfinderCamera") as Camera3D
+	var head_height: float = player.head_position().y - player.global_position.y
+	if absf(head_height - viewfinder.position.y) > 0.001:
+		return "head %.2f m and viewfinder %.2f m disagree" % [head_height, viewfinder.position.y]
+	var lens: MeshInstance3D = player.find_child("Lens", true, false) as MeshInstance3D
+	if lens == null or not lens.mesh.surface_get_material(0) is ShaderMaterial:
+		return "camera prop is not toon shaded"
+	return ""

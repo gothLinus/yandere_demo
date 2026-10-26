@@ -19,11 +19,8 @@ const MODE_CAMERA: StringName = &"camera"
 const MODE_HIDDEN: StringName = &"hidden"
 const MODE_SEATED: StringName = &"seated"
 
-const WORLD_COLLISION_MASK: int = 1
 const TURN_RATE: float = 10.0
-const CROUCH_BLEND_RATE: float = 6.0
 const LOCOMOTION_BLEND_RATE: float = 8.0
-const EYE_BELOW_TOP: float = 0.1
 const CROUCH_HEIGHT_RATIO: float = CROUCH_HEIGHT / STAND_HEIGHT
 const ANIMATION_XFADE_SECONDS: float = 0.25
 const CAMERA_HAND_BONE: StringName = &"hand.R"
@@ -66,7 +63,14 @@ var _camera_prop: Node3D
 @onready var _model: Node3D = $Model
 
 
+func _init() -> void:
+	collision_layer = PhysicsLayers.PLAYER
+	collision_mask = PhysicsLayers.WORLD
+
+
 func _ready() -> void:
+	_interaction_area.collision_layer = 0
+	_interaction_area.collision_mask = PhysicsLayers.INTERACTABLE
 	_build_animation_tree()
 	_build_camera_prop()
 	_footstep_timer.timeout.connect(_on_footstep_timer_timeout)
@@ -110,6 +114,11 @@ func move_speed() -> float:
 func enter_camera_mode() -> bool:
 	if mode == MODE_HIDDEN or mode == MODE_SEATED:
 		return false
+	_crouching = false
+	_crouch_blend = 0.0
+	if is_node_ready():
+		_body_shape.set_height_ratio(1.0)
+	_set_stance(GameTypes.Stance.WALK)
 	_set_mode(MODE_CAMERA)
 	return true
 
@@ -168,7 +177,7 @@ func drop_carried() -> StringName:
 
 func head_position() -> Vector3:
 	var height: float = lerpf(STAND_HEIGHT, CROUCH_HEIGHT, _crouch_blend)
-	return global_position + Vector3.UP * (height - EYE_BELOW_TOP)
+	return global_position + Vector3.UP * (height - tuning.eye_below_top)
 
 
 func is_watching(target_head: Vector3, space: PhysicsDirectSpaceState3D, max_distance: float) -> bool:
@@ -177,7 +186,7 @@ func is_watching(target_head: Vector3, space: PhysicsDirectSpaceState3D, max_dis
 	var origin: Vector3 = head_position()
 	if origin.distance_to(target_head) > max_distance:
 		return false
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, target_head, WORLD_COLLISION_MASK, [get_rid()])
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, target_head, PhysicsLayers.LINE_OF_SIGHT_MASK, [get_rid()])
 	return space.intersect_ray(query).is_empty()
 
 
@@ -280,7 +289,7 @@ func _is_standing_up() -> bool:
 
 func _update_crouch_blend(delta: float) -> void:
 	var target: float = 1.0 if _crouching else 0.0
-	_crouch_blend = move_toward(_crouch_blend, target, CROUCH_BLEND_RATE * delta)
+	_crouch_blend = move_toward(_crouch_blend, target, tuning.crouch_blend_rate * delta)
 	_body_shape.set_height_ratio(lerpf(1.0, CROUCH_HEIGHT_RATIO, _crouch_blend))
 
 
@@ -390,8 +399,10 @@ func _build_camera_prop() -> void:
 
 ## Bone axes (checked against player_take_photo): +Y along the fingers, +Z toward the way the character faces.
 func _make_camera_prop() -> Node3D:
-	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_color = CAMERA_PROP_COLOR
+	var source: StandardMaterial3D = StandardMaterial3D.new()
+	source.resource_name = "M_CameraProp"
+	source.albedo_color = CAMERA_PROP_COLOR
+	var material: ShaderMaterial = ToonConverter.make_toon_material(source)
 	var body_mesh: BoxMesh = BoxMesh.new()
 	body_mesh.size = CAMERA_PROP_BODY_SIZE
 	body_mesh.material = material
