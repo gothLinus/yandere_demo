@@ -13,6 +13,7 @@ const HEAD_BONE: StringName = &"head"
 const EYE_OFFSET: Vector3 = Vector3(0.0, 0.06, 0.08)
 const FLOOR_SNAP_LENGTH: float = 0.4
 const MINIMUM_DIRECTION_LENGTH: float = 0.001
+const PATH_END_TOLERANCE: float = 0.1
 const CLOCK_AUTOLOAD_PATH: NodePath = ^"/root/SchoolClock"
 
 @export var tuning: CastTuning = preload("res://data/cast_tuning.tres")
@@ -119,18 +120,23 @@ func _walk_to(point: Vector3) -> bool:
 	return true
 
 
-## Steps toward the agent's target; returns true once navigation has finished or the body is stuck.
+## Steps along the agent's path; returns true at the path end, or once the body is stuck.
 func _step_walk(delta: float) -> bool:
-	if _agent.is_navigation_finished():
-		_step_halt(delta)
-		return true
+	var finished: bool = _agent.is_navigation_finished()
+	var waypoint: Vector3 = _agent.get_final_position() if finished else _agent.get_next_path_position()
+	var toward: Vector3 = waypoint - global_position
+	toward.y = 0.0
 	_stuck_seconds = _stuck_seconds + delta if _measured_speed < tuning.stuck_speed else 0.0
-	if _stuck_seconds >= tuning.stuck_seconds:
+	if (finished and toward.length() <= PATH_END_TOLERANCE) or _stuck_seconds >= tuning.stuck_seconds:
 		_step_halt(delta)
 		return true
 	_speed = move_toward(_speed, tuning.walk_speed, tuning.acceleration * delta)
-	var toward: Vector3 = _agent.get_next_path_position() - global_position
-	toward.y = 0.0
+	if finished:
+		# The agent stops target_desired_distance short of the path end and no longer avoids (its safe velocity is
+		# zero), so the last stretch goes straight there.
+		_turn_toward(_yaw_of(toward), delta)
+		_on_velocity_computed(toward.normalized() * minf(_speed, toward.length() / delta))
+		return false
 	if toward.length() > MINIMUM_DIRECTION_LENGTH:
 		_move_yaw = _yaw_step(_move_yaw, _yaw_of(toward), delta)
 	rotation.y = _yaw_step(rotation.y, _move_yaw, delta)

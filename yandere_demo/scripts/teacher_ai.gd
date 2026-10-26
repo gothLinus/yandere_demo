@@ -3,6 +3,8 @@ extends CastCharacter
 ## The patrolling teacher (spec §4.5): walks TeacherPatrol_01..08 in order, looks around at every third point, and
 ## while he sees the player raises School Alert for each reason that applies, with a "!" above his head.
 
+signal patrol_point_reached(point: Node3D)
+
 const PATROL_PREFIX: String = "TeacherPatrol_"
 const ANIMATION_IDLE: StringName = &"teacher_idle"
 const ANIMATION_WALK: StringName = &"teacher_walk"
@@ -136,6 +138,7 @@ func _walk_to_patrol_point() -> void:
 
 ## Every `teacher_look_around_every`-th point (TeacherPatrol_03, _06, ...) he stops and looks around.
 func _arrive_at_patrol_point() -> void:
+	patrol_point_reached.emit(_patrol_points[_patrol_index])
 	var point_number: int = _patrol_index + 1
 	_patrol_index = (_patrol_index + 1) % _patrol_points.size()
 	if point_number % tuning.teacher_look_around_every == 0:
