@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/stealth_player.gd" id="1_player"]
 [ext_resource type="PackedScene" path="res://assets/models/player.glb" id="2_model"]
@@ -7,6 +7,7 @@
 
 [ext_resource type="Script" path="res://scripts/photo_mode.gd" id="5_photo"]
 [ext_resource type="Script" path="res://scripts/yandere_vision.gd" id="6_vision"]
+[ext_resource type="Script" path="res://scripts/audio/footstep_player.gd" id="7_footsteps"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_interaction"]
 radius = 1.2
@@ -53,3 +54,7 @@ script = ExtResource("5_photo")
 
 [node name="YandereVision" type="Node" parent="."]
 script = ExtResource("6_vision")
+
+[node name="FootstepPlayer" type="AudioStreamPlayer3D" parent="."]
+script = ExtResource("7_footsteps")
+unit_size = 6.0

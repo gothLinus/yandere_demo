@@ -13,6 +13,7 @@ config/icon="res://icon.svg"
 SchoolClock="*res://scripts/school_clock.gd"
 SanitySystem="*res://scripts/sanity_system.gd"
 GameManager="*res://scripts/game_manager.gd"
+AudioDirector="*res://scripts/audio/audio_director.gd"
 
 [input]
 
