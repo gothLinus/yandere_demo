@@ -7,9 +7,9 @@
 [sub_resource type="Resource" id="chain_braid"]
 script = ExtResource("2_chain")
 chain_prefix = &"braid"
-stiffness = 0.45
+stiffness = 3.0
 drag = 0.5
-gravity = 1.0
+gravity = 0.2
 radius = 0.03
 root_bones = PackedStringArray("braid_01")
 end_bones = PackedStringArray("braid_10")
@@ -17,6 +17,10 @@ end_bone_lengths = PackedFloat32Array(0.0658)
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"chest", &"hips"])
+influence = 0.3
+animation_influence = Dictionary[StringName, float]({
+&"target_fix_braid": 0.0
+})
 
 [sub_resource type="Resource" id="chain_ahoge"]
 script = ExtResource("2_chain")
@@ -91,7 +95,7 @@ colliders = Array[StringName]([&"chest"])
 [sub_resource type="Resource" id="chain_skirt"]
 script = ExtResource("2_chain")
 chain_prefix = &"skirt"
-stiffness = 1.1
+stiffness = 4.0
 drag = 0.55
 gravity = 0.1
 radius = 0.025
@@ -101,13 +105,14 @@ end_bone_lengths = PackedFloat32Array(0.169, 0.1691, 0.1694, 0.1691, 0.169, 0.16
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"thigh.L", &"thigh.R", &"hips"])
+influence = 0.3
 
 [sub_resource type="Resource" id="chain_braid_bow"]
 script = ExtResource("2_chain")
 chain_prefix = &"braid_bow"
-stiffness = 1.5
+stiffness = 3.0
 drag = 0.4
-gravity = 0.6
+gravity = 0.2
 radius = 0.02
 root_bones = PackedStringArray("braid_bow")
 end_bones = PackedStringArray("braid_bow")
@@ -115,6 +120,7 @@ end_bone_lengths = PackedFloat32Array(0.06)
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"hips", &"thigh.L", &"thigh.R"])
+influence = 0.3
 
 [sub_resource type="Resource" id="collider_thigh_L"]
 script = ExtResource("3_collider")
@@ -150,6 +156,5 @@ rotation_offset = Quaternion(0.28024, 0, -0.2456, 0.92798)
 
 [resource]
 script = ExtResource("1_tuning")
-center_bone = &"root"
 chains = Array[ExtResource("2_chain")]([SubResource("chain_braid"), SubResource("chain_ahoge"), SubResource("chain_hair_front"), SubResource("chain_hair_side"), SubResource("chain_neckerchief"), SubResource("chain_sleeve"), SubResource("chain_skirt"), SubResource("chain_braid_bow")])
 colliders = Array[ExtResource("3_collider")]([SubResource("collider_thigh_L"), SubResource("collider_thigh_R"), SubResource("collider_hips"), SubResource("collider_chest")])

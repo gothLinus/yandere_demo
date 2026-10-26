@@ -2,17 +2,22 @@ extends TestCase
 
 const TUNING_PATH: String = "res://data/secondary_motion.tres"
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
-# Chain prefix -> [stiffness, drag, gravity, radius] (task 9b defaults). Skirt gravity is 0.1, not the plan's
-# 0.7: see the comment in secondary_motion_tuning.gd.
+# Chain prefix -> [stiffness, drag, gravity, radius, influence] (task 9b defaults; braid, bow and skirt retuned for
+# ruling R10, measured by tests/integration/target_secondary_motion). Skirt gravity is 0.1, not the plan's 0.7: see
+# the comment in secondary_motion_tuning.gd.
 const EXPECTED_CHAINS: Dictionary[StringName, Array] = {
-	&"braid": [0.45, 0.5, 1.0, 0.03],
-	&"ahoge": [2.0, 0.15, 0.1, 0.01],
-	&"hair_front": [1.6, 0.35, 0.3, 0.015],
-	&"hair_side": [1.2, 0.4, 0.5, 0.02],
-	&"neckerchief": [1.0, 0.45, 0.6, 0.015],
-	&"sleeve": [2.5, 0.6, 0.2, 0.03],
-	&"skirt": [1.1, 0.55, 0.1, 0.025],
-	&"braid_bow": [1.5, 0.4, 0.6, 0.02],
+	&"braid": [3.0, 0.5, 0.2, 0.03, 0.3],
+	&"ahoge": [2.0, 0.15, 0.1, 0.01, 1.0],
+	&"hair_front": [1.6, 0.35, 0.3, 0.015, 1.0],
+	&"hair_side": [1.2, 0.4, 0.5, 0.02, 1.0],
+	&"neckerchief": [1.0, 0.45, 0.6, 0.015, 1.0],
+	&"sleeve": [2.5, 0.6, 0.2, 0.03, 1.0],
+	&"skirt": [4.0, 0.55, 0.1, 0.025, 0.3],
+	&"braid_bow": [3.0, 0.4, 0.2, 0.02, 0.3],
+}
+# The hands hold the braid in target_fix_braid, so its springs let go for that clip.
+const EXPECTED_ANIMATION_INFLUENCE: Dictionary[StringName, Dictionary] = {
+	&"braid": {&"target_fix_braid": 0.0},
 }
 # Which capsules each chain family collides with. The skirt must keep off the legs and hips; the braid and the
 # neckerchief lie on the chest (the neckerchief tails hang inside the hips capsule, so not that one).
@@ -73,7 +78,6 @@ func test_secondary_motion_has_eight_chain_entries() -> void:
 	if tuning == null:
 		return
 	assert_eq(tuning.chains.size(), 8, "eight chain entries")
-	assert_eq(tuning.center_bone, &"root", "chains simulate in the character's own space")
 	for prefix: StringName in EXPECTED_CHAINS:
 		var setting: SecondaryChainSetting = tuning.chain(prefix)
 		assert_true(setting != null, "chain %s exists" % prefix)
@@ -84,6 +88,8 @@ func test_secondary_motion_has_eight_chain_entries() -> void:
 		assert_near(setting.drag, values[1], 1e-6, "%s drag" % prefix)
 		assert_near(setting.gravity, values[2], 1e-6, "%s gravity" % prefix)
 		assert_near(setting.radius, values[3], 1e-6, "%s radius" % prefix)
+		assert_near(setting.influence, values[4], 1e-6, "%s influence" % prefix)
+		assert_eq(setting.animation_influence, EXPECTED_ANIMATION_INFLUENCE.get(prefix, {}), "%s animation influence" % prefix)
 		assert_true(not setting.root_bones.is_empty(), "%s lists its chains" % prefix)
 		assert_eq(setting.root_bones.size(), setting.end_bones.size(), "%s roots and ends pair up" % prefix)
 		assert_eq(setting.end_bone_lengths.size(), setting.end_bones.size(), "%s has one end length per chain" % prefix)

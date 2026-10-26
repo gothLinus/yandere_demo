@@ -21,3 +21,7 @@ extends Resource
 @export var end_bone_direction: SkeletonModifier3D.BoneDirection = SkeletonModifier3D.BONE_DIRECTION_PLUS_Y
 ## Bones of the `SecondaryMotionTuning.colliders` this family collides with; every joint clears them at rest.
 @export var colliders: Array[StringName] = []
+## Share of the simulated motion blended over the animated pose (`SkeletonModifier3D.influence`).
+@export_range(0.0, 1.0) var influence: float = 1.0
+## Animation name -> influence while that animation plays, for clips whose hands hold the chain.
+@export var animation_influence: Dictionary[StringName, float] = {}
