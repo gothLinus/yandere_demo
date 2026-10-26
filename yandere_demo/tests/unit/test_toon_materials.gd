@@ -100,3 +100,49 @@ func test_blush_uses_the_alpha_blended_toon_shader_without_outline() -> void:
 	assert_eq(converted.get_shader_parameter("albedo_color"), blush_color, "blush keeps its colour and alpha")
 	assert_true(converted.next_pass == null, "no outline on the blush")
 	root.free()
+
+
+func test_emission_carries_into_the_toon_material() -> void:
+	var root: Node3D = Node3D.new()
+	var glowing_material: StandardMaterial3D = make_material("M_PropVending", Color.WHITE)
+	glowing_material.emission_enabled = true
+	glowing_material.emission = Color(0.9, 0.95, 1.0)
+	glowing_material.emission_energy_multiplier = 2.0
+	var panel: MeshInstance3D = make_mesh_instance("Panel", glowing_material)
+	var wall: MeshInstance3D = make_mesh_instance("Wall", make_material("M_Wall", Color.WHITE))
+	root.add_child(panel)
+	root.add_child(wall)
+	ToonConverter.convert_environment(root, 0.012)
+	var converted: ShaderMaterial = panel.mesh.surface_get_material(0) as ShaderMaterial
+	assert_eq(converted.get_shader_parameter("emission_color"), Color(0.9, 0.95, 1.0), "emission colour carried over")
+	assert_eq(converted.get_shader_parameter("emission_energy"), 2.0, "emission energy carried over")
+	var plain: ShaderMaterial = wall.mesh.surface_get_material(0) as ShaderMaterial
+	assert_true(plain.get_shader_parameter("emission_energy") == null, "non-emissive materials keep the shader default of 0")
+	root.free()
+
+
+func test_environment_glass_stays_translucent_and_characters_do_not_change() -> void:
+	var glass_color: Color = Color(0.83, 0.93, 0.97, 0.25)
+	var environment_root: Node3D = Node3D.new()
+	var environment_glass: MeshInstance3D = make_mesh_instance("Glass", _make_blended_material("M_Glass", glass_color))
+	environment_root.add_child(environment_glass)
+	ToonConverter.convert_environment(environment_root, 0.012)
+	var glass: ShaderMaterial = environment_glass.mesh.surface_get_material(0) as ShaderMaterial
+	assert_eq(glass.shader, ToonConverter.GLASS_SHADER, "environment glass uses the translucent glass shader")
+	assert_eq(glass.get_shader_parameter("albedo_color"), glass_color, "glass keeps its alpha")
+	assert_true(glass.next_pass == null, "no outline on glass")
+	environment_root.free()
+
+	var character_root: Node3D = Node3D.new()
+	var character_surface: MeshInstance3D = make_mesh_instance("Lens", _make_blended_material("M_Lens", glass_color))
+	character_root.add_child(character_surface)
+	ToonConverter.convert_character(character_root, 0.004)
+	assert_eq((character_surface.mesh.surface_get_material(0) as ShaderMaterial).shader, ToonConverter.TOON_SHADER,
+		"characters keep the toon shader")
+	character_root.free()
+
+
+func _make_blended_material(material_name: String, color: Color) -> StandardMaterial3D:
+	var material: StandardMaterial3D = make_material(material_name, color)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return material

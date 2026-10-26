@@ -7,6 +7,9 @@ uniform vec4 albedo_color : source_color = vec4(1.0);
 uniform sampler2D albedo_texture : source_color, hint_default_white;
 uniform bool use_texture = false;
 uniform bool is_vision_highlight = false;
+// Self-lit surfaces such as the vending machine panel; zero leaves every other material unchanged.
+uniform vec4 emission_color : source_color = vec4(0.0, 0.0, 0.0, 1.0);
+uniform float emission_energy = 0.0;
 // Hair shine: a band across every lock at a fixed fraction from root (UV.y 0) to tip (UV.y 1). It drifts with
 // the viewing angle and has a jagged edge, which reads as the anisotropic "angel ring" of anime hair.
 uniform bool use_hair_band = false;
@@ -28,6 +31,7 @@ void fragment() {
 		base.rgb = mix(base.rgb, hair_band_color.rgb, band * hair_band_strength * smoothstep(0.1, 0.5, facing));
 	}
 	ALBEDO = base.rgb;
+	EMISSION = emission_color.rgb * emission_energy;
 	ALPHA = base.a;
 	ALPHA_SCISSOR_THRESHOLD = 0.5;
 }

@@ -4,6 +4,7 @@ extends RefCounted
 const TOON_SHADER: Shader = preload("res://assets/shaders/toon.gdshader")
 const OUTLINE_SHADER: Shader = preload("res://assets/shaders/outline.gdshader")
 const BLUSH_SHADER: Shader = preload("res://assets/shaders/toon_blush.gdshader")
+const GLASS_SHADER: Shader = preload("res://assets/shaders/toon_glass.gdshader")
 const BLUSH_MATERIAL_NAME: String = "M_FaceBlush"
 # Exact names: M_HairShade (the dark under-layer) and M_HairClip (metal) get no shine band.
 const HAIR_BAND_MATERIALS: Array[String] = ["M_Hair", "M_HairStreak"]
@@ -16,12 +17,12 @@ static func convert_character(scene: Node, outline_width: float = 0.004) -> void
 	_extract_body_shape(scene)
 	_remove_proxy_meshes(scene)
 	for instance: MeshInstance3D in _collect_mesh_instances(scene):
-		_convert_instance(instance, outline_width, _character_wants_outline)
+		_convert_instance(instance, outline_width, _character_wants_outline, false)
 
 
 static func convert_environment(scene: Node, outline_width: float = 0.012) -> void:
 	for instance: MeshInstance3D in _collect_mesh_instances(scene):
-		_convert_instance(instance, outline_width, _environment_wants_outline)
+		_convert_instance(instance, outline_width, _environment_wants_outline, true)
 
 
 static func _character_wants_outline(material_name: String) -> bool:
@@ -48,7 +49,7 @@ static func _collect_mesh_instances(scene: Node) -> Array[MeshInstance3D]:
 	return instances
 
 
-static func _convert_instance(instance: MeshInstance3D, outline_width: float, wants_outline: Callable) -> void:
+static func _convert_instance(instance: MeshInstance3D, outline_width: float, wants_outline: Callable, allows_glass: bool) -> void:
 	var mesh: Mesh = instance.mesh
 	if mesh == null:
 		return
@@ -58,8 +59,9 @@ static func _convert_instance(instance: MeshInstance3D, outline_width: float, wa
 		var standard: BaseMaterial3D = source as BaseMaterial3D
 		if standard == null:
 			continue
-		var converted: ShaderMaterial = _make_toon_material(standard)
-		if wants_outline.call(standard.resource_name):
+		var is_glass: bool = allows_glass and _is_glass(standard)
+		var converted: ShaderMaterial = _make_glass_material(standard) if is_glass else _make_toon_material(standard)
+		if not is_glass and wants_outline.call(standard.resource_name):
 			converted.next_pass = _make_outline_material(outline_width)
 		mesh.surface_set_material(surface_index, converted)
 		if override_material != null:
@@ -79,6 +81,23 @@ static func _make_toon_material(source: BaseMaterial3D) -> ShaderMaterial:
 		material.set_shader_parameter("use_texture", true)
 	if HAIR_BAND_MATERIALS.has(source.resource_name):
 		material.set_shader_parameter("use_hair_band", true)
+	if source.emission_enabled:
+		material.set_shader_parameter("emission_color", source.emission)
+		material.set_shader_parameter("emission_energy", source.emission_energy_multiplier)
+	return material
+
+
+# Untextured alpha-blended environment surfaces (window glass) stay translucent instead of being alpha-scissored.
+static func _is_glass(source: BaseMaterial3D) -> bool:
+	var is_blended: bool = source.transparency in [BaseMaterial3D.TRANSPARENCY_ALPHA, BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS]
+	return is_blended and source.albedo_texture == null and source.albedo_color.a < 1.0
+
+
+static func _make_glass_material(source: BaseMaterial3D) -> ShaderMaterial:
+	var material: ShaderMaterial = ShaderMaterial.new()
+	material.resource_name = source.resource_name
+	material.shader = GLASS_SHADER
+	material.set_shader_parameter("albedo_color", source.albedo_color)
 	return material
 
 

@@ -97,6 +97,14 @@ func test_materials_and_prop_outlines() -> void:
 	for material_name: String in materials_by_name:
 		var has_outline: bool = materials_by_name[material_name].next_pass != null
 		assert_eq(has_outline, material_name.begins_with("M_Prop"), "%s outline only on M_Prop*" % material_name)
+	if materials_by_name.has("M_PropVending"):
+		var energy: Variant = materials_by_name["M_PropVending"].get_shader_parameter("emission_energy")
+		assert_true(energy != null and float(energy) > 0.0, "the vending panel glows, emission energy %s" % energy)
+	if materials_by_name.has("M_Glass"):
+		var glass: ShaderMaterial = materials_by_name["M_Glass"]
+		assert_eq(glass.shader, ToonConverter.GLASS_SHADER, "glass is translucent, not alpha-scissored")
+		var glass_color: Color = glass.get_shader_parameter("albedo_color")
+		assert_true(glass_color.a > 0.0 and glass_color.a < 1.0, "glass alpha is translucent, got %s" % glass_color.a)
 	root.free()
 
 
