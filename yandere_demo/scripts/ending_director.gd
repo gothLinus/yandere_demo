@@ -32,11 +32,8 @@ const PLAYBACK_PARAMETER: StringName = &"parameters/playback"
 
 const SEQUENCE_SECONDS: float = 12.0
 const TURN_SECONDS: float = 1.2
-const TURN_START_OFFSET: float = deg_to_rad(110.0)
 const WAVE_SECONDS: float = 3.5
 const NOTICE_DELAY_SECONDS: float = 1.5
-const WALK_MINIMUM_SECONDS: float = 10.0
-const WALK_MAXIMUM_SECONDS: float = 15.0
 const WALK_SPEED: float = 1.3
 const WALK_TURN_RATE: float = 8.0
 const TITLE_FADE_SECONDS: float = 1.0
@@ -67,6 +64,9 @@ const SHRINE_PAN_FRACTION: float = 0.3
 
 var _progress: WeekProgress
 var _target_playback: AnimationNodeStateMachinePlayback
+var _walk_path: PackedVector3Array = PackedVector3Array()
+var _walk_length: float = 0.0
+var _walk_distance: float = 0.0
 
 @onready var _school_env: SchoolEnv = %SchoolEnv
 @onready var _target: TargetAI = %Target
@@ -82,6 +82,12 @@ func _ready() -> void:
 	_new_week_button.pressed.connect(GameManager.new_week)
 	var animation_tree: AnimationTree = _target.get_node(^"AnimationTree")
 	_target_playback = animation_tree.get(PLAYBACK_PARAMETER)
+
+
+func _process(delta: float) -> void:
+	if _walk_distance < _walk_length:
+		_walk_distance = minf(_walk_distance + WALK_SPEED * delta, _walk_length)
+		_move_target_along(_walk_distance, _walk_path, _walk_length)
 
 
 func play(ending_id: StringName, progress: WeekProgress) -> void:
@@ -149,16 +155,16 @@ func _play_stranger() -> void:
 		_school_env.marker(GATE_MARKER).global_position,
 		true
 	)
-	var path_length: float = _path_length(path)
-	var walk_seconds: float = clampf(path_length / WALK_SPEED, WALK_MINIMUM_SECONDS, WALK_MAXIMUM_SECONDS)
-	# The Gate is far, so the walk cycle is sped up to match the pace that fits the 15 s sequence.
-	var animation_tree: AnimationTree = _target.get_node(^"AnimationTree")
-	animation_tree.set(TargetAI.LOCOMOTION_BLEND_PARAMETER, 1.0)
-	animation_tree.set(TargetAI.WALK_TIME_SCALE_PARAMETER, path_length / walk_seconds / TargetAI.WALK_CLIP_SPEED)
+	# The stand can lie off the navmesh, so the walk starts at the stand itself instead of popping onto the path.
+	path.insert(0, _target.global_position)
+	# The Gate is far away, so the shot cuts to the title card before he gets there.
+	var walked_length: float = minf(_path_length(path), WALK_SPEED * SEQUENCE_SECONDS)
+	_target.get_node(^"AnimationTree").set(TargetAI.LOCOMOTION_BLEND_PARAMETER, 1.0)
 	_target_playback.travel(STATE_LOCOMOTION)
-	var walk: Tween = create_tween()
-	walk.tween_method(_move_target_along.bind(path, path_length), 0.0, path_length, walk_seconds)
-	await walk.finished
+	_walk_path = path
+	_walk_length = walked_length
+	_walk_distance = 0.0
+	await _wait(SEQUENCE_SECONDS)
 
 
 func _play_shrine() -> void:
@@ -188,7 +194,6 @@ func _place_actors() -> void:
 func _turn_target_toward_player() -> void:
 	var offset: Vector3 = _player.global_position - _target.global_position
 	var final_yaw: float = atan2(-offset.x, -offset.z)
-	_target.rotation.y = final_yaw + TURN_START_OFFSET
 	create_tween().tween_property(_target, "rotation:y", final_yaw, TURN_SECONDS)
 	_target.look_toward(_player.global_position + Vector3.UP * LOOK_AT_HEIGHT)
 

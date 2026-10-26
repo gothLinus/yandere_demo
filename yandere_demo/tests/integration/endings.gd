@@ -8,7 +8,12 @@ const TEST_SAVE_PATH: String = "user://test_save.json"
 const TIME_SCALE: float = 8.0
 const MINIMUM_PHYSICS_STEPS: int = 64
 const FINISH_TIMEOUT_MILLISECONDS: int = 30000
-const GATE_REACHED_DISTANCE: float = 1.5
+const MINIMUM_TRAVEL_DISTANCE: float = 10.0
+const SAMPLING_PRIORITY: int = 100
+const PASS_DISTANCE: float = 3.0
+const MAXIMUM_WALK_SPEED: float = 1.5
+const MINIMUM_SEQUENCE_SECONDS: float = 10.0
+const MAXIMUM_SEQUENCE_SECONDS: float = 15.0
 const BANKED_PHOTO_COUNT: int = 3
 const TITLES: Dictionary = {
 	&"cherry_tree": "Under the Cherry Tree",
@@ -20,9 +25,20 @@ const TITLES: Dictionary = {
 var _finished_ids: Array[StringName] = []
 var _previous_time_scale: float = 1.0
 var _previous_physics_steps: int = 8
+var _sequence_seconds: float = 0.0
+var _observed_target: TargetAI
+var _observed_player: Node3D
+var _last_position: Vector3 = Vector3.ZERO
+var _travelled: float = 0.0
+var _fastest_speed: float = 0.0
+var _closest_distance: float = INF
+var _final_distance: float = 0.0
+var _max_look_influence: float = 0.0
 
 
 func _ready() -> void:
+	# Sampling must follow the director's own _process in the same frame, or each step is divided by the wrong delta.
+	process_priority = SAMPLING_PRIORITY
 	GameManager.test_mode = true
 	SaveStore.erase(TEST_SAVE_PATH)
 	_previous_time_scale = Engine.time_scale
@@ -36,6 +52,26 @@ func _ready() -> void:
 		pass_test()
 	else:
 		fail_test(failure)
+
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if _observed_target == null or delta <= 0.0:
+		return
+	_sequence_seconds += delta
+	_sample(delta)
+
+
+func _sample(delta: float) -> void:
+	var position: Vector3 = _observed_target.global_position
+	var step: float = Vector2(position.x - _last_position.x, position.z - _last_position.z).length()
+	_travelled += step
+	_fastest_speed = maxf(_fastest_speed, step / delta)
+	_last_position = position
+	_final_distance = position.distance_to(_observed_player.global_position)
+	_closest_distance = minf(_closest_distance, _final_distance)
+	var look_at: LookAtModifier3D = _observed_target.get_node(^"Model/TargetChar/Skeleton3D/LookAtModifier3D")
+	_max_look_influence = maxf(_max_look_influence, look_at.influence)
 
 
 func _exit_tree() -> void:
@@ -79,14 +115,30 @@ func _play_ending(ending_id: StringName, progress: WeekProgress) -> String:
 	add_child(director)
 	_finished_ids.clear()
 	director.ending_finished.connect(func(finished_id: StringName) -> void: _finished_ids.append(finished_id))
+	var school_env: SchoolEnv = director.get_node("%SchoolEnv")
+	if not school_env.is_navigation_ready:
+		await school_env.navigation_ready
 	director.play(ending_id, progress)
+	_begin_observing(director)
 	var started_at: int = Time.get_ticks_msec()
 	while _finished_ids.is_empty() and Time.get_ticks_msec() - started_at < FINISH_TIMEOUT_MILLISECONDS:
 		await get_tree().process_frame
+	_observed_target = null
 	var failure: String = _verify(director, ending_id)
 	director.queue_free()
 	await get_tree().process_frame
 	return failure
+
+
+func _begin_observing(director: EndingDirector) -> void:
+	_sequence_seconds = 0.0
+	_travelled = 0.0
+	_fastest_speed = 0.0
+	_closest_distance = INF
+	_max_look_influence = 0.0
+	_observed_player = director.get_node("%Player")
+	_last_position = director.get_node("%Target").global_position
+	_observed_target = director.get_node("%Target")
 
 
 func _verify(director: EndingDirector, ending_id: StringName) -> String:
@@ -106,10 +158,15 @@ func _verify(director: EndingDirector, ending_id: StringName) -> String:
 	var expected_quads: int = BANKED_PHOTO_COUNT if ending_id == &"shrine" else 0
 	if photo_quads.size() != expected_quads:
 		return "%d shrine photo quads, expected %d" % [photo_quads.size(), expected_quads]
+	if _sequence_seconds < MINIMUM_SEQUENCE_SECONDS or _sequence_seconds > MAXIMUM_SEQUENCE_SECONDS:
+		return "the sequence took %.1f s, outside 10-15 s" % _sequence_seconds
 	if ending_id == &"stranger":
-		var target: Node3D = director.get_node("%Target")
-		var gate: Node3D = director.get_node("%SchoolEnv").marker("Gate")
-		var distance: float = target.global_position.distance_to(gate.global_position)
-		if distance > GATE_REACHED_DISTANCE:
-			return "the target stopped %.1f m from the Gate" % distance
+		if _travelled < MINIMUM_TRAVEL_DISTANCE:
+			return "he walked only %.1f m" % _travelled
+		if _fastest_speed > MAXIMUM_WALK_SPEED:
+			return "he moved at %.2f m/s on one frame" % _fastest_speed
+		if _closest_distance >= _final_distance or _closest_distance > PASS_DISTANCE:
+			return "he did not pass the player (closest %.1f m, final %.1f m)" % [_closest_distance, _final_distance]
+		if _max_look_influence > 0.0:
+			return "his LookAt influence rose to %.2f" % _max_look_influence
 	return ""
