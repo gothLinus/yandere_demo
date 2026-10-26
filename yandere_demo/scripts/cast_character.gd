@@ -245,7 +245,9 @@ func _state_machine(animation_player: AnimationPlayer, idle_clip: StringName, wa
 		if clip != walk_clip:
 			machine.add_node(clip, _animation_node(clip), Vector2(250.0, 80.0 * states.size()))
 			states.append(clip)
-	machine.add_transition(&"Start", STATE_LOCOMOTION, AnimationNodeStateMachineTransition.new())
+	var start_transition: AnimationNodeStateMachineTransition = AnimationNodeStateMachineTransition.new()
+	start_transition.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
+	machine.add_transition(&"Start", STATE_LOCOMOTION, start_transition)
 	var crossfade: AnimationNodeStateMachineTransition = AnimationNodeStateMachineTransition.new()
 	crossfade.xfade_time = CROSSFADE_SECONDS
 	for from_state: StringName in states:

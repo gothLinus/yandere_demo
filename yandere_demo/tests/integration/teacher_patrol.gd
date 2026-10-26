@@ -48,6 +48,12 @@ func _ready() -> void:
 	_meters = StealthMeters.new(STEALTH_TUNING)
 	_teacher = (load(TEACHER_SCENE_PATH) as PackedScene).instantiate() as TeacherAI
 	add_child(_teacher)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var playback: AnimationNodeStateMachinePlayback = (_teacher.get_node(^"AnimationTree") as AnimationTree).get(&"parameters/playback")
+	if playback.get_current_node() != CastCharacter.STATE_LOCOMOTION:
+		fail_test("a fresh teacher is not in locomotion but %s, so he stands in the rest pose" % playback.get_current_node())
+		return
 	_teacher.patrol_point_reached.connect(_on_patrol_point_reached)
 	var failure: String = await _patrols_in_order()
 	if failure.is_empty():
