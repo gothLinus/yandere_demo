@@ -78,4 +78,4 @@ func _start_fade() -> FadeToken:
 func _show_minute(minute: float) -> void:
 	_clock_face.minute_of_day = minute
 	var total_minutes: int = floori(minute)
-	_clock_label.text = "%02d:%02d" % [total_minutes / 60, total_minutes % 60]
+	_clock_label.text = "%02d:%02d" % [floori(total_minutes / 60.0), total_minutes % 60]

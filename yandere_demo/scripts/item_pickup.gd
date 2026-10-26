@@ -34,7 +34,7 @@ func _ready() -> void:
 
 func prompt_text(_player: StealthPlayer) -> String:
 	var definition: ItemDefinition = definition_for(item_id)
-	return "E – Take %s" % (definition.display_name if definition != null else item_id)
+	return "E – Take %s" % (definition.display_name if definition != null else String(item_id))
 
 
 func can_interact(player: StealthPlayer) -> bool:

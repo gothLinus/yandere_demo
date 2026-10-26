@@ -258,7 +258,7 @@ func _hang_photos(wall: Node3D, wall_normal: Vector3, wall_tangent: Vector3) -> 
 	var orientation: Basis = Basis(wall_tangent, Vector3.UP, wall_normal)
 	for index: int in photos.size():
 		var column: int = index % columns
-		var row: int = index / columns
+		var row: int = floori(float(index) / columns)
 		var quad: MeshInstance3D = MeshInstance3D.new()
 		var mesh: QuadMesh = QuadMesh.new()
 		mesh.size = SHRINE_TILE_SIZE
