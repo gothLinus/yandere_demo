@@ -145,10 +145,10 @@ def acting_idle(rig: CharacterRig, frame: float, period: float) -> BodySpec:
 
 PALM_CENTRE_SHARE = 0.6
 PALM_SKIN_DEPTH = 0.017
-# A finger joint stops curling once it is this close to the prop's surface (half a finger's thickness).
-FINGER_CONTACT = 0.008
+# A wrapping finger lies on the prop: its joints (bone centrelines) sit about half a finger's thickness off the surface.
+FINGER_CENTRE_DEPTH = 0.008
 FINGER_CURL_STEP = 3.0
-FINGER_CURL_LIMIT = 200.0
+FINGER_JOINT_LIMIT = 100.0
 
 BOOK_LEAF_SIZE = Vector((0.14, 0.2, 0.012))
 # Each leaf of the open book turns this far toward the reader from the flat spread.
@@ -157,11 +157,11 @@ PHONE_SIZE = Vector((0.07, 0.14, 0.009))
 CAN_RADIUS = 0.033
 CAN_HEIGHT = 0.12
 BROOM_HANDLE_RADIUS = 0.012
-BROOM_HANDLE_LENGTH = 1.08
+BROOM_HANDLE_LENGTH = 1.25
 BROOM_HEAD_HEIGHT = 0.12
 # The left hand grips the handle this far below its top, the right hand this far further down.
-BROOM_TOP_GRIP = 0.16
-BROOM_GRIP_SPACING = 0.34
+BROOM_TOP_GRIP = 0.15
+BROOM_GRIP_SPACING = 0.2
 
 
 def oriented_frame(origin: Vector, fingers: Vector, normal: Vector) -> Matrix:
@@ -211,11 +211,13 @@ BACK_TO_FRONT = Vector((0.0, 0.0, 1.0))
 GRIPS = {
     "book": {".R": _book_grip(1.0), ".L": _book_grip(-1.0)},
     "phone": {".R": oriented_frame(Vector((0.0, -0.012, -PHONE_SIZE.z * 0.5)), Vector((-0.3, 0.95, 0.0)), BACK_TO_FRONT)},
-    "can": {".R": oriented_frame(Vector((0.0, 0.004, -CAN_RADIUS)), Vector((1.0, 0.0, 0.0)), BACK_TO_FRONT)},
+    # The can sits toward the finger roots, so the fingers have room to wrap it.
+    "can": {".R": oriented_frame(Vector((0.012, 0.004, -math.sqrt(CAN_RADIUS ** 2 - 0.012 ** 2))), Vector((-1.0, 0.0, 0.0)),
+                                 BACK_TO_FRONT)},
     "broom": {
         ".L": oriented_frame(Vector((0.0, -BROOM_TOP_GRIP, -BROOM_HANDLE_RADIUS)), Vector((1.0, 0.0, 0.0)), BACK_TO_FRONT),
         ".R": oriented_frame(Vector((0.0, -BROOM_TOP_GRIP - BROOM_GRIP_SPACING, BROOM_HANDLE_RADIUS)),
-                             Vector((-1.0, 0.0, 0.0)), -BACK_TO_FRONT),
+                             Vector((1.0, 0.0, 0.0)), -BACK_TO_FRONT),
     },
 }
 # The bone each prop hangs from in Godot (TargetProps.PROP_BONES).
@@ -281,21 +283,27 @@ def prop_distance(prop: str, point: Vector) -> float:
 
 
 def wrap_curls(skeleton, side: str, prop: str) -> dict:
-    """Per-finger curls that close each finger round the prop until it touches: index..pinky -> degrees."""
+    """Per-finger curls that lay each finger round the prop: index..pinky -> (knuckle, middle, end joint) degrees.
+    Each finger takes the bend at its knuckle and the even bend of its two outer joints that lay its outer segments
+    closest to the surface (least squares), without any of them sinking into it."""
     hand_to_prop = GRIPS[prop][side] @ palm_local(skeleton, side).inverted() @ bone_matrix(skeleton, f"hand{side}").inverted()
     curls = {}
     for finger in FINGERS:
         chain = [f"{finger}_0{index}{side}" for index in (1, 2, 3)]
-        curl = 0.0
-        while curl < FINGER_CURL_LIMIT:
-            pose = Pose()
-            curl_fingers(skeleton, pose, side, 0.0, 0.0, {finger: curl})
-            world, heads = forward_kinematics(skeleton, pose)
-            joints = [heads[chain[1]], heads[chain[2]], tail_position(skeleton, world, heads, chain[2])]
-            if min(prop_distance(prop, hand_to_prop @ joint) for joint in joints) <= FINGER_CONTACT:
-                break
-            curl += FINGER_CURL_STEP
-        curls[finger] = curl
+        best = (math.inf, (0.0, 0.0, 0.0))
+        for knuckle_step in range(int(FINGER_JOINT_LIMIT / FINGER_CURL_STEP) + 1):
+            for outer_step in range(int(FINGER_JOINT_LIMIT / FINGER_CURL_STEP) + 1):
+                angles = (knuckle_step * FINGER_CURL_STEP,) + (outer_step * FINGER_CURL_STEP,) * 2
+                pose = Pose()
+                curl_fingers(skeleton, pose, side, 0.0, 0.0, {finger: angles})
+                world, heads = forward_kinematics(skeleton, pose)
+                tip = tail_position(skeleton, world, heads, chain[2])
+                points = (heads[chain[1]], heads[chain[1]].lerp(heads[chain[2]], 0.5), heads[chain[2]],
+                          heads[chain[2]].lerp(tip, 0.5), tip)
+                distances = [prop_distance(prop, hand_to_prop @ point) for point in points]
+                if min(distances) >= FINGER_CENTRE_DEPTH * 0.5:
+                    best = min(best, (sum((distance - FINGER_CENTRE_DEPTH) ** 2 for distance in distances), angles))
+        curls[finger] = best[1]
     return curls
 
 
@@ -304,6 +312,20 @@ def eyes(rig: CharacterRig, pose) -> Vector:
     world, heads = forward_kinematics(rig.skeleton, pose)
     origin, rotation = heads["chest"], world["chest"]
     return origin + rotation @ (rig.mouth(pose) + Vector((0.0, 0.0, 0.06)))
+
+
+def axis_frame(origin: Vector, axis: Vector, facing: Vector) -> Matrix:
+    """A prop frame at `origin` with +Y along `axis` and +Z turned as close to `facing` as it allows."""
+    axis = axis.normalized()
+    normal = (facing - axis * facing.dot(axis)).normalized()
+    matrix = Matrix((axis.cross(normal), axis, normal)).transposed().to_4x4()
+    matrix.translation = origin
+    return matrix
+
+
+def to_world(rig: CharacterRig, pose, chest_point: Vector) -> Vector:
+    origin, rotation = rig.chest_frame(pose)
+    return origin + rotation @ chest_point
 
 
 def facing_frame(origin: Vector, up: Vector, toward: Vector) -> Matrix:
@@ -465,68 +487,91 @@ def clip_walk(rig: CharacterRig, frame: float, cycle: WalkCycle) -> BodySpec:
 
 
 NOTICE_KEYS = {
-    "hips_yaw": [(0, 0), (7, 6), (12, 9.5), (20, 8.5), (30, 8.5)],
-    "spine_yaw": [(0, 0), (6, 5), (11, 8), (19, 7), (30, 7)],
-    "chest_yaw": [(0, 0), (5, 5), (10, 7.5), (18, 6.5), (30, 6.5)],
-    "neck_yaw": [(0, 0), (4, 4), (9, 6), (30, 5)],
-    "chest_pitch": [(0, 0), (5, -3.5), (13, -1), (30, -1)],
-    "shoulders": [(0, 0), (4, 7), (10, 4), (30, 1.5)],
-    "elbow": [(0, 0), (6, 18), (13, 13), (30, 11)],
-    "swing": [(0, 0), (6, 9), (30, 6)],
-    "drop": [(0, 0), (6, -0.012), (16, -0.005), (30, -0.006)],
-    "weight": [(0, 0), (10, 0.006), (30, 0.005)],
+    # A beat of stillness with a caught breath, then the head turns first and the body follows it round.
+    "head_yaw": [(0, 0), (3, 0), (7, 7), (11, 9), (16, 7.5), (30, 7)],
+    "neck_yaw": [(0, 0), (4, 0), (9, 5), (14, 6.5), (30, 5)],
+    "chest_yaw": [(0, 0), (6, 0), (11, 5), (17, 7.5), (22, 6.5), (30, 6.5)],
+    "spine_yaw": [(0, 0), (7, 0), (13, 5), (19, 8), (30, 7)],
+    "hips_yaw": [(0, 0), (9, 0), (15, 6), (21, 9.5), (30, 8.5)],
+    "chest_pitch": [(0, 0), (3, -3.5), (8, -2), (14, -1), (30, -1)],
+    "shoulders": [(0, 0), (3, 6), (9, 4), (30, 1.5)],
+    "drop": [(0, 0), (3, -0.004), (10, -0.012), (18, -0.005), (30, -0.006)],
+    "weight": [(0, 0), (12, 0.006), (30, 0.005)],
+    "back": [(0, 0), (4, 0.006), (14, 0.004), (30, 0.003)],
+    # The right hand drifts up toward the chest, the fingers curling as it comes.
+    "hand": [(0, 0), (5, 0), (16, 1), (30, 1)],
 }
+NOTICE_HAND_AT_CHEST = Vector((-0.04, -0.165, -0.04))
 
 
 def clip_notice_player(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
-    spec = rig.idle_body(frame, 90.0)
+    spec = acting_idle(rig, frame, 90.0)
     value = {name: curve.scalar(frame) for name, curve in curves.items()}
-    spec.hips_offset += Vector((value["weight"], 0.0, value["drop"]))
+    spec.hips_offset += Vector((value["weight"], value["back"], value["drop"]))
     spec.hips = add_degrees(spec.hips, (0.0, 0.0, value["hips_yaw"]))
     spec.spine = add_degrees(spec.spine, (0.0, 0.0, value["spine_yaw"]))
     spec.chest = add_degrees(spec.chest, (value["chest_pitch"], 0.0, value["chest_yaw"]))
     spec.neck = add_degrees(spec.neck, (0.0, 0.0, value["neck_yaw"]))
+    spec.head = add_degrees(spec.head, (0.0, 0.0, value["head_yaw"]))
     for side in SIDES:
-        arm = spec.arms[side]
-        arm.shoulder = add_degrees(arm.shoulder, (0.0, value["shoulders"], 0.0))
-        arm.elbow += value["elbow"] * (1.0 if side == ".R" else 0.7)
-        arm.swing += value["swing"]
-        arm.fingers += value["elbow"] * 0.6
+        spec.arms[side].shoulder = add_degrees(spec.arms[side].shoulder, (0.0, value["shoulders"], 0.0))
+    hand = value["hand"]
+    right = spec.arms[".R"]
+    right.wrist = rig.idle_wrists[".R"].lerp(NOTICE_HAND_AT_CHEST, hand) + Vector((0.0, -0.025, 0.0)) * math.sin(math.pi * hand)
+    right.pole = rig.idle_poles[".R"].lerp(Vector((-0.6, 0.6, -0.5)), hand)
+    right.aim = ((0.2, -0.3, 0.9), (0.3, 0.9, 0.0))
+    right.aim_weight = hand
+    right.finger_curls = finger_fan(9.0 + 30.0 * hand, 6.0 + 4.0 * hand, 2.0, frame / 30.0)
+    right.thumb = 14.0 + 20.0 * hand
+    left = spec.arms[".L"]
+    left.elbow += 8.0 * hand
+    left.finger_curls = finger_fan(9.0 + 14.0 * hand, 6.0, 2.0, frame / 30.0 + 0.3)
     return spec
 
 
 def startled_curves(rig: CharacterRig) -> dict:
+    """"Eek!": a flinch down (anticipation), a hop up onto the toes with the shoulders up and both hands snapping to
+    the chest, then a landing into bent knees and a quick, settling breath."""
     chest_left = Vector((0.065, -0.155, -0.02))
     chest_right = Vector((-0.045, -0.165, 0.03))
     curves = {
-        "drop": Curve([(0, 0.0), (3, -0.026), (7, -0.036), (12, -0.028), (20, -0.03)]),
-        "back": Curve([(0, 0.0), (4, 0.03), (9, 0.026), (20, 0.024)]),
-        "spine_pitch": Curve([(0, 0.0), (3, -3.0), (8, -1.5), (20, -0.5)]),
-        "chest_pitch": Curve([(0, 0.0), (3, -8.0), (7, -3.0), (12, -4.5), (20, -3.5)]),
-        "head_pitch": Curve([(0, 0.0), (3, -6.0), (8, -1.0), (20, -2.0)]),
-        "shoulders": Curve([(0, 0.0), (3, 12.0), (8, 9.0), (20, 8.0)]),
-        "fingers": Curve([(0, 18.0), (4, 55.0), (20, 60.0)]),
-        "hips_yaw": Curve([(0, 0.0), (4, -3.0), (20, -2.0)]),
+        "drop": Curve([(0, 0.0), (2, -0.008), (5, 0.012), (8, -0.022), (11, -0.034), (15, -0.026), (20, -0.028)]),
+        "back": Curve([(0, 0.0), (2, 0.004), (5, 0.022), (9, 0.028), (20, 0.024)]),
+        "heels": Curve([(0, 0.0), (2, 0.0), (4, 14.0), (6, 12.0), (9, 0.0), (20, 0.0)]),
+        "spine_pitch": Curve([(0, 0.0), (2, 2.0), (5, -4.0), (9, -1.0), (13, 1.5), (20, 0.5)]),
+        "chest_pitch": Curve([(0, 0.0), (2, 2.0), (5, -9.0), (8, -3.0), (12, -5.0), (20, -3.5)]),
+        "head_pitch": Curve([(0, 0.0), (2, 2.0), (5, -7.0), (9, -1.0), (13, 1.0), (20, -1.0)]),
+        "head_roll": Curve([(0, 0.0), (4, 0.0), (8, 4.0), (14, 3.0), (20, 3.0)]),
+        "shoulders": Curve([(0, 0.0), (2, -2.0), (5, 14.0), (9, 8.0), (13, 10.0), (20, 8.0)]),
+        "fingers": Curve([(0, 18.0), (3, 18.0), (6, 62.0), (11, 52.0), (20, 58.0)]),
+        "hips_yaw": Curve([(0, 0.0), (5, -3.0), (20, -2.0)]),
     }
     for side, target in ((".L", chest_left), (".R", chest_right)):
         idle_wrist = rig.idle_wrists[side]
         lift = idle_wrist.lerp(target, 0.6) + Vector((0.0, -0.08, 0.0))
-        curves[f"wrist{side}"] = Curve([(0, idle_wrist), (4, lift), (7, target), (12, target + Vector((0.0, 0.006, -0.01))), (20, target)])
+        curves[f"wrist{side}"] = Curve([(0, idle_wrist), (2, idle_wrist + Vector((0.0, 0.0, -0.01))), (4, lift), (6, target),
+                                        (10, target + Vector((0.0, 0.008, -0.012))), (14, target + Vector((0.0, -0.003, 0.004))),
+                                        (20, target)])
         idle_pole = rig.idle_poles[side]
         tucked = Vector((side_sign(side) * 0.5, 0.6, -0.6))
-        curves[f"pole{side}"] = Curve([(0, idle_pole), (6, tucked), (20, tucked)])
-        curves[f"aim{side}"] = Curve([(0, 0.0), (6, 1.0), (20, 1.0)])
+        curves[f"pole{side}"] = Curve([(0, idle_pole), (2, idle_pole), (6, tucked), (20, tucked)])
+        curves[f"aim{side}"] = Curve([(0, 0.0), (2, 0.0), (6, 1.0), (20, 1.0)])
     return curves
 
 
 def clip_startled(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
-    spec = rig.idle_body(frame, 90.0)
-    spec.breath_amount = 0.4
+    spec = acting_idle(rig, frame, 90.0)
+    # A fast, shallow breath after the fright.
+    spec.breath_phase = 0.0 if frame < 9.0 else (frame - 9.0) / 11.0
+    spec.breath_amount = 1.6
     spec.hips_offset += Vector((0.0, curves["back"].scalar(frame), curves["drop"].scalar(frame)))
     spec.hips = add_degrees(spec.hips, (0.0, 0.0, curves["hips_yaw"].scalar(frame)))
+    heels = curves["heels"].scalar(frame)
+    spec.feet = rig_feet(rig, {side: (x, y, yaw, pitch + heels) for side, (x, y, yaw, pitch) in IDLE_FEET.items()})
     spec.spine = add_degrees(spec.spine, (curves["spine_pitch"].scalar(frame), 0.0, 0.0))
     spec.chest = add_degrees(spec.chest, (curves["chest_pitch"].scalar(frame), 0.0, 0.0))
-    spec.head = add_degrees(spec.head, (curves["head_pitch"].scalar(frame), 0.0, 0.0))
+    spec.neck = add_degrees(spec.neck, (curves["head_pitch"].scalar(frame - 1.0) * 0.5, 0.0, 0.0))
+    spec.head = add_degrees(spec.head, (curves["head_pitch"].scalar(frame), curves["head_roll"].scalar(frame), 0.0))
     for side in SIDES:
         arm = spec.arms[side]
         arm.shoulder = add_degrees(arm.shoulder, (0.0, curves["shoulders"].scalar(frame), 0.0))
@@ -534,8 +579,11 @@ def clip_startled(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
         arm.pole = curves[f"pole{side}"].vector(frame)
         arm.aim = ((side_sign(side) * -0.2, -0.3, 0.9), (-side_sign(side) * 0.3, 0.9, 0.0))
         arm.aim_weight = curves[f"aim{side}"].scalar(frame)
-        arm.fingers = curves["fingers"].scalar(frame)
+        # The fingers snap shut a frame after the hands arrive, the pinky last.
+        arm.finger_curls = {name: curves["fingers"].scalar(frame - 0.7 * index) + 4.0 * index
+                            for index, name in enumerate(FINGERS)}
         arm.thumb = 30.0
+        arm.splay = -3.0
     return spec
 
 
@@ -664,34 +712,55 @@ def clip_phone(rig: CharacterRig, frame_number: float) -> BodySpec:
     return spec
 
 
-DRINK_RAISE = Curve([(0, 0.0), (18, 0.0), (36, 1.0), (72, 1.0), (90, 0.0), (120, 0.0)], period=120.0)
-DRINK_TILT = Curve([(0, 0.0), (30, 0.0), (42, 1.0), (62, 1.0), (76, 0.0), (120, 0.0)], period=120.0)
-# The fist sits below and in front of the mouth (where a held can's rim meets the lips), medial enough
-# to clear the braid over his right shoulder. Chest-space offset from the head-carried mouth landmark.
-DRINK_HAND_FROM_MOUTH = Vector((-0.02, -0.075, -0.075))
-DRINK_GLANCE = Curve([(0, 0.0), (94, 0.0), (104, 6.0), (114, 2.0), (120, 0.0)], period=120.0)
+# The can comes up after a little dip of the hand, tips to the lips while the head tilts back for three swallows, and
+# comes down with a satisfied breath out; then he glances aside and taps the can.
+DRINK_RAISE = Curve([(0, 0.0), (14, 0.0), (17, -0.08), (32, 1.0), (64, 1.0), (80, 0.0), (120, 0.0)], period=120.0)
+DRINK_TILT = Curve([(0, 0.0), (28, 0.0), (38, 1.0), (60, 1.0), (70, 0.0), (120, 0.0)], period=120.0)
+DRINK_SWALLOW = Curve([(0, 0.0), (40, 0.0), (42, 1.0), (45, 0.0), (48, 1.0), (51, 0.0), (55, 1.0), (58, 0.0), (120, 0.0)],
+                      period=120.0)
+DRINK_SIGH = Curve([(0, 0.0), (68, 0.0), (76, 1.0), (88, 0.0), (120, 0.0)], period=120.0)
+DRINK_GLANCE = Curve([(0, 0.0), (92, 0.0), (100, 7.0), (112, 2.0), (120, 0.0)], period=120.0)
+DRINK_TAP = Curve([(0, 0.0), (96, 0.0), (98, 1.0), (100, 0.0), (102, 1.0), (104, 0.0), (120, 0.0)], period=120.0)
+# The held can in front of the waist (chest space), and how far it tips back at the lips.
+CAN_AT_WAIST = Vector((-0.07, -0.2, -0.17))
+CAN_DRINK_DEGREES = 72.0
+CAN_HOLD_DEGREES = 8.0
+# The can's top rim sits this far in front of the mouth landmark (forward, up) while he drinks.
+CAN_RIM_FROM_MOUTH = Vector((0.0, -0.025, -0.005))
 
 
-def clip_drink(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.idle_body(frame, 120.0)
+def clip_drink(rig: CharacterRig, frame: float, can_curls: dict) -> BodySpec:
+    spec = acting_idle(rig, frame, 120.0)
     raise_amount = DRINK_RAISE.scalar(frame)
     tilt = DRINK_TILT.scalar(frame)
-    spec.chest = add_degrees(spec.chest, (-2.0 * tilt, 0.0, -2.0 * raise_amount))
-    spec.neck = add_degrees(spec.neck, (-5.0 * tilt, 0.0, 0.0))
-    spec.head = add_degrees(spec.head, (-10.0 * tilt, 1.5 * tilt, DRINK_GLANCE.scalar(frame)))
+    swallow = DRINK_SWALLOW.scalar(frame)
+    sigh = DRINK_SIGH.scalar(frame)
+    spec.chest = add_degrees(spec.chest, (-2.0 * tilt + 2.0 * sigh, 0.0, -2.0 * max(0.0, raise_amount)))
+    spec.neck = add_degrees(spec.neck, (-5.0 * tilt + 1.5 * swallow, 0.0, 0.0))
+    spec.head = add_degrees(spec.head, (-10.0 * tilt + 3.0 * sigh, 1.5 * tilt, DRINK_GLANCE.scalar(frame)))
+    for side in SIDES:
+        spec.arms[side].shoulder = add_degrees(spec.arms[side].shoulder, (0.0, -2.5 * sigh, 0.0))
+    left = spec.arms[".L"]
+    left.elbow += 10.0 * tilt
+    left.swing += 4.0 * tilt
+    pose = compose(rig, spec)
+    origin, rotation = rig.chest_frame(pose)
+    forward = rotation @ Vector((0.0, -1.0, 0.0))
+    up = rotation @ Vector((0.0, 0.0, 1.0))
+    outward = rotation @ Vector((1.0, 0.0, 0.0))
+    angle = math.radians(CAN_HOLD_DEGREES + (CAN_DRINK_DEGREES - CAN_HOLD_DEGREES) * tilt)
+    axis = up * math.cos(angle) - forward * math.sin(angle)
+    at_waist = to_world(rig, pose, CAN_AT_WAIST)
+    at_lips = to_world(rig, pose, rig.mouth(pose) + CAN_RIM_FROM_MOUTH) - axis * (CAN_HEIGHT * 0.5)
+    centre = at_waist.lerp(at_lips, max(0.0, raise_amount)) + up * 0.02 * min(0.0, raise_amount) / 0.08
+    centre += forward * 0.03 * math.sin(math.pi * max(0.0, raise_amount))
+    can = axis_frame(centre, axis, outward)
     right = spec.arms[".R"]
-    hold = Vector((-0.07, -0.17, -0.2))
-    arc = Vector((0.0, -0.025, 0.02)) * math.sin(math.pi * raise_amount) - Vector((0.0, 0.0, 0.02)) * tilt
-
-    def wrist_to_mouth(pose) -> Vector:
-        return hold.lerp(rig.mouth(pose) + DRINK_HAND_FROM_MOUTH, raise_amount) + arc
-
-    right.wrist = wrist_to_mouth
-    right.pole = Vector((-0.7, 0.55, -0.6))
-    tip = Quaternion(Vector((1.0, 0.0, 0.0)), math.radians(-55.0 * tilt))
-    right.aim = (tip @ Vector((0.35, -0.85, 0.1)), tip @ Vector((0.9, 0.3, 0.0)))
-    right.fingers = 48.0
-    right.thumb = 30.0
+    hold_prop(rig, right, ".R", "can", can, Vector((-0.7, 0.55, -0.6)))
+    # The index lifts off the can at its knuckle to tap it.
+    tap = 14.0 * DRINK_TAP.scalar(frame)
+    right.finger_curls = {**can_curls, "index": (can_curls["index"][0] - tap,) + can_curls["index"][1:]}
+    right.thumb = 40.0
     return spec
 
 
@@ -730,7 +799,7 @@ def held_braid_rotations(braid: BraidLayout, amount: float) -> dict:
 
 
 def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict, braid: BraidLayout) -> BodySpec:
-    spec = rig.idle_body(frame, 150.0)
+    spec = acting_idle(rig, frame, 150.0)
     lift = BRAID_HOLD_LIFT.scalar(frame)
     reach = BRAID_REACH.scalar(frame)
     stroke = curves["stroke"].scalar(frame)
@@ -760,15 +829,16 @@ def clip_fix_braid(rig: CharacterRig, frame: float, curves: dict, braid: BraidLa
     right.pole = rig.idle_poles[".R"].lerp(Vector((-0.8, 0.5, -0.4)), lift)
     right.aim = RIGHT_BRAID_AIM
     right.aim_weight = lift
-    right.fingers = 18.0 + 40.0 * lift
-    right.thumb = 10.0 + 25.0 * lift
+    right.finger_curls = finger_fan(9.0 + 44.0 * lift, 6.0, 2.0, frame / 150.0)
+    right.thumb = 14.0 + 21.0 * lift
     left = spec.arms[".L"]
     left.wrist = left_wrist
     left.pole = rig.idle_poles[".L"].lerp(Vector((0.85, -0.2, -0.5)), reach)
     left.aim = LEFT_BRAID_AIM
     left.aim_weight = reach
-    left.fingers = 18.0 + 30.0 * reach
-    left.thumb = 10.0 + 30.0 * reach
+    # The stroking fingers close on the way down the braid and open as the hand lifts off it.
+    left.finger_curls = finger_fan(9.0 + 26.0 * reach - 12.0 * away * reach, 6.0, 4.0 * reach, stroke, 0.06)
+    left.thumb = 14.0 + 26.0 * reach
     return spec
 
 
@@ -832,10 +902,15 @@ def _blend_aim(first: tuple, second: tuple, weight: float) -> tuple:
 
 
 SWEEP_FEET = {".L": (0.047, -0.092, 14.0, 0.0), ".R": (-0.037, 0.058, -18.0, 0.0)}
+# The top hand rides in front of the waist; the broom's head sweeps an arc on the floor in front of his right foot,
+# its bristles leading each stroke and trailing behind the turn of the body.
+SWEEP_TOP_HAND = Vector((-0.08, -0.22, 0.03))
+SWEEP_AZIMUTH = -22.0
+SWEEP_ARC = 26.0
 
 
-def clip_sweep(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.idle_body(frame, 60.0)
+def clip_sweep(rig: CharacterRig, frame: float, broom_curls: dict) -> BodySpec:
+    spec = acting_idle(rig, frame, 60.0)
     phase = frame / 60.0
     stroke = math.sin(2.0 * math.pi * phase)
     lagged = math.sin(2.0 * math.pi * (phase - 0.06))
@@ -846,20 +921,24 @@ def clip_sweep(rig: CharacterRig, frame: float) -> BodySpec:
     spec.spine = (6.0, 1.0 * lagged, 4.0 * stroke)
     spec.chest = (5.0, 0.0, 5.0 * stroke)
     spec.neck = (6.0, 0.0, -4.0 * stroke)
-    spec.head = (6.0, -2.0, -5.0 * stroke)
-    top = Vector((-0.05, -0.2, -0.02))
-    bottom = Vector((-0.15, -0.3, -0.26))
-    sweep = Vector((0.11, 0.0, 0.0)) * stroke + Vector((0.0, 0.025, 0.0)) * math.cos(2.0 * math.pi * phase)
+    spec.head = (8.0, -2.0, -5.0 * math.sin(2.0 * math.pi * (phase - 0.1)))
+    pose = compose(rig, spec)
+    grip_on_axis = to_world(rig, pose, SWEEP_TOP_HAND + Vector((0.05 * stroke, 0.015 * math.cos(2.0 * math.pi * phase), 0.0)))
+    reach = BROOM_HANDLE_LENGTH + BROOM_HEAD_HEIGHT * 0.5 - BROOM_TOP_GRIP
+    azimuth = math.radians(SWEEP_AZIMUTH + SWEEP_ARC * math.sin(2.0 * math.pi * (phase - 0.08)))
+    across = math.sqrt(max(0.0, reach * reach - grip_on_axis.z * grip_on_axis.z))
+    head = Vector((grip_on_axis.x - math.sin(azimuth) * across, grip_on_axis.y - math.cos(azimuth) * across, 0.0))
+    axis = (grip_on_axis - head).normalized()
+    top = grip_on_axis + axis * BROOM_TOP_GRIP
+    broom = axis_frame(top, axis, Vector((-1.0, 0.0, -0.3)))
     left = spec.arms[".L"]
-    left.wrist = top + sweep * 0.6
-    left.pole = Vector((0.8, 0.4, -0.5))
-    left.aim = ((-0.85, -0.3, -0.3), (-0.2, 0.3, -0.9))
-    left.fingers, left.thumb = 65.0, 40.0
+    hold_prop(rig, left, ".L", "broom", broom, Vector((0.8, 0.4, -0.5)))
+    left.finger_curls = broom_curls[".L"]
+    left.thumb = 50.0
     right = spec.arms[".R"]
-    right.wrist = bottom + sweep
-    right.pole = Vector((-0.8, 0.5, -0.3))
-    right.aim = ((0.9, -0.3, -0.2), (0.2, -0.3, 0.9))
-    right.fingers, right.thumb = 65.0, 40.0
+    hold_prop(rig, right, ".R", "broom", broom, Vector((-0.8, 0.5, -0.3)))
+    right.finger_curls = broom_curls[".R"]
+    right.thumb = 50.0
     spec.skirt_sway = 2.0 * math.cos(2.0 * math.pi * (phase - 0.1))
     return spec
 
@@ -1016,6 +1095,9 @@ def target_clips(rig: CharacterRig, braid: BraidLayout, braid_resting: animation
     sit_down = sit_down_curves(rig)
     braid_curves = fix_braid_curves(rig)
     stand_up = stand_up_curves(rig)
+    can_curls = wrap_curls(rig.skeleton, ".R", "can")
+    broom_curls = {side: wrap_curls(rig.skeleton, side, "broom") for side in SIDES}
+    print(f"wrapping curls: can {can_curls}, broom {broom_curls}")
     clips = [
         ("target_idle", 90, True, lambda frame: clip_idle(rig, frame)),
         ("target_walk_routine", WALK.frame_count, True, lambda frame: clip_walk(rig, frame, walk)),
@@ -1029,10 +1111,10 @@ def target_clips(rig: CharacterRig, braid: BraidLayout, braid_resting: animation
         ("target_sit", 90, True, lambda frame: clip_sit(rig, frame)),
         ("target_sit_read", 120, True, lambda frame: clip_sit_read(rig, frame)),
         ("target_phone", 120, True, lambda frame: clip_phone(rig, frame)),
-        ("target_drink", 120, True, lambda frame: clip_drink(rig, frame)),
+        ("target_drink", 120, True, lambda frame: clip_drink(rig, frame, can_curls)),
         ("target_fix_braid", 150, True, lambda frame: clip_fix_braid(rig, frame, braid_curves, braid)),
         ("target_lean_chat", 120, True, lambda frame: clip_lean_chat(rig, frame)),
-        ("target_sweep", 60, True, lambda frame: clip_sweep(rig, frame)),
+        ("target_sweep", 60, True, lambda frame: clip_sweep(rig, frame, broom_curls)),
         ("target_wave", 45, True, lambda frame: clip_wave(rig, frame)),
         ("target_idle_shy", 120, True, lambda frame: clip_idle_shy(rig, frame)),
         ("target_idle_playful", 90, True, lambda frame: clip_idle_playful(rig, frame)),

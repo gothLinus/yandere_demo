@@ -420,7 +420,8 @@ def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: flo
 
     Only chains named like fingers (`FINGER_CHAIN_PREFIXES`) curl, so props or attachment bones parented to
     the hand are left alone. The thumb takes `thumb_degrees` and curls across the palm; the others take
-    `fingers_degrees`, or their own entry of `finger_curls` (finger prefix such as "index" -> degrees).
+    `fingers_degrees`, or their own entry of `finger_curls` (finger prefix such as "index" -> degrees shared evenly, or a
+    tuple of degrees per segment from the knuckle out).
     `splay_degrees` fans the fingers apart (negative closes them), the index and pinky the most.
     """
     hand = f"hand{side}"
@@ -433,8 +434,8 @@ def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: flo
         curl = thumb_degrees if is_thumb else fingers_degrees
         if finger_curls is not None and not is_thumb:
             curl = finger_curls.get(chain[0].split("_")[0], curl)
-        angle = curl / len(chain)
-        for bone in chain:
+        angles = curl if isinstance(curl, tuple) else (curl / len(chain),) * len(chain)
+        for bone, angle in zip(chain, angles):
             pose.rotations[bone] = Quaternion()
             bend(skeleton, pose, bone, angle, across_palm if is_thumb else palm)
         if splay_degrees and not is_thumb:
