@@ -1,9 +1,9 @@
 """The Astolfo Source model (blender/source/astolfo/astolfo_source.blend) converted to the target contract.
 
 The ValveBiped rig becomes one armature `TargetChar` with the project's humanoid names (`rig.HUMANOID_BONES`), its
-bones on the model's own joints and its arms lowered to the project's rest angle, so every clip generator applies
-unchanged. The model's helper, hair, bow and ribbon bones keep their weights under project names, and the skirt
-gains eight three-bone chains. Meshes become `Target<Part>` with `M_<Part>` materials on the model's own textures,
+bones on the model's own joints, its arms lowered to the project's rest angle and its fingers relaxed, so every clip
+generator applies unchanged. The model's helper, hair, bow and ribbon bones keep their weights under project names,
+the forefeet move onto the toe bones, and the skirt gains eight three-bone chains. Meshes become `Target<Part>` with `M_<Part>` materials on the model's own textures,
 the face's flexes are baked into the game's expression shape keys, and `Target-col` is a capsule fitted to the body.
 """
 

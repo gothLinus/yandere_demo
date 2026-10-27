@@ -22,6 +22,14 @@ TEXTURE_DIRECTORY = os.path.join(SOURCE_DIRECTORY, "textures")
 BLEND_PATH = os.path.join(SOURCE_DIRECTORY, "astolfo_source.blend")
 ADDON_NAME = "SourceIO"
 FACE_MESH_NAME = "astolfo_head_reference.smd"
+PNG_FORMAT = "PNG"
+
+
+def _enum_identifier(struct, property_name: str, wanted: str) -> str:
+    identifiers = [item.identifier for item in struct.bl_rna.properties[property_name].enum_items]
+    if wanted not in identifiers:
+        raise ValueError(f"{property_name} has no {wanted}; available: {identifiers}")
+    return wanted
 
 
 def import_model() -> None:
@@ -54,7 +62,7 @@ def textures_to_png() -> list[str]:
     written = []
     for image in sorted(used, key=lambda candidate: candidate.name):
         path = os.path.join(TEXTURE_DIRECTORY, f"{image.name.lower()}.png")
-        image.file_format = "PNG"
+        image.file_format = _enum_identifier(bpy.types.Image, "file_format", PNG_FORMAT)
         image.save(filepath=path)
         converted = bpy.data.images.load(path, check_existing=False)
         converted.colorspace_settings.name = image.colorspace_settings.name
