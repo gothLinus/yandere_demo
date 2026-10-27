@@ -252,7 +252,7 @@ def _parents_first(parents: dict) -> list:
 
 def _continuations() -> dict:
     """Bone -> the bone whose head is its tail (the next joint along a limb, finger or chain)."""
-    following = {"hips": "spine", "spine": "chest", "chest": "neck", "neck": "head"}
+    following = {"spine": "chest", "chest": "neck", "neck": "head"}
     for side in SIDES:
         for first, second in (("shoulder", "upper_arm"), ("upper_arm", "forearm"), ("forearm", "hand"),
                               ("thigh", "shin"), ("shin", "foot"), ("foot", "toe")):
@@ -275,6 +275,9 @@ def _tail(name: str, heads: dict, parents: dict, source_tails: dict, dominant: d
         return heads[following[name]].copy()
     if name == "head":
         return Vector((head.x, head.y, CROWN_HEIGHT))
+    if name == "hips":
+        # The model's spine starts behind the pelvis; the hips point straight up so their +Y is the body's up axis.
+        return head + Vector((0.0, 0.0, (heads["spine"] - head).length))
     if name.startswith("hand"):
         side = name[-2:]
         knuckles = [heads[f"{finger}_01{side}"] for finger in FINGERS[1:]]
@@ -631,18 +634,19 @@ def _lap_offset(armature, meshes: dict) -> Vector:
     return Vector((LAP_INWARD, 0.0, front + LAP_HAND_CLEARANCE))
 
 
-# Rings of the thigh (fractions along hip to knee) whose forward reach sizes the skirt's leg capsules, and how far
-# from the knee joint its skin counts as the knee.
+# Rings of the thigh (fractions along hip to knee) whose radius sizes the skirt's leg capsules, and how far from the
+# knee joint its skin counts as the knee.
 THIGH_TOP_RING = (0.15, 0.4)
 THIGH_BOTTOM_RING = (0.85, 0.95)
 KNEE_REACH = 0.04
 
 
 def _leg_radii(armature, meshes: dict) -> tuple:
-    """(thigh radius at its top, thigh radius at the knee, knee radius) of the left leg's skin, measured forward.
+    """(thigh radius at its top, thigh radius at the knee, knee radius) of the left leg's skin.
 
-    A stride pushes the front of the thigh into the skirt, and a capsule as wide as the thigh's widest ring would
-    already stand out of the hanging skirt at rest.
+    The thigh rings are measured all round, since a stride pushes the front and the side of the thigh into the skirt
+    (where a ring already reaches the hanging skirt at rest, clear_legs keeps only that rest clearance). The knee is
+    measured forward: only the bent knee's front juts out.
     """
     bones = armature.data.bones
     hip = bones["thigh.L"].head_local
@@ -658,7 +662,7 @@ def _leg_radii(armature, meshes: dict) -> tuple:
                 continue
             point = mesh_object.matrix_world @ vertex.co
             fraction = (point - hip).dot(axis) / axis.length_squared
-            reach = (point - (hip + axis * fraction)).dot(forward)
+            reach = (point - (hip + axis * fraction)).length
             if (point - knee).length < KNEE_REACH:
                 knee_radius = max(knee_radius, (point - knee).dot(forward))
             if names[strongest.group] != "thigh.L":

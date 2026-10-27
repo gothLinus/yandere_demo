@@ -9,14 +9,14 @@ const OUTPUT_PATH: String = "res://scenes/target.tscn"
 const MODEL_PATH: String = "res://assets/models/target.glb"
 const SKELETON_PATH: NodePath = ^"../Model/TargetChar/Skeleton3D"
 const CROSSFADE_SECONDS: float = 0.3
-const EYE_HEIGHT: float = 1.45
-const LOOK_TARGET_OFFSET: Vector3 = Vector3(0.0, 1.45, -2.0)
+const EYE_HEIGHT: float = 1.48
+const LOOK_TARGET_OFFSET: Vector3 = Vector3(0.0, 1.48, -2.0)
 ## check_phone layers target_phone's upper body fully over target_idle.
 const CHECK_PHONE_BLEND_PARAMETER: StringName = &"parameters/check_phone/upper_body/blend_amount"
 const SKELETON_TRACK_PREFIX: String = "TargetChar/Skeleton3D:"
-## Bone subtrees check_phone takes from target_phone; the hips, legs, skirt, braid and hair keep the idle.
+## Bone subtrees check_phone takes from target_phone; the hips, legs, skirt, braid, hair, bows and ribbons keep the idle.
 const UPPER_BODY_ROOTS: Array[String] = ["spine"]
-const UPPER_BODY_EXCLUDED_PREFIXES: Array[String] = ["braid", "hair_", "ahoge"]
+const UPPER_BODY_EXCLUDED_PREFIXES: Array[String] = ["braid", "hair_", "ahoge", "head_bow", "ribbon"]
 
 
 func _initialize() -> void:
@@ -123,7 +123,9 @@ func _state_machine(player: AnimationPlayer, skeleton: Skeleton3D) -> AnimationN
 			continue
 		machine.add_node(clip, _animation(clip), Vector2(300.0 + 200.0 * (index % 3), 60.0 * index))
 		states.append(clip)
-	machine.add_transition(&"Start", &"locomotion", AnimationNodeStateMachineTransition.new())
+	var start_transition: AnimationNodeStateMachineTransition = AnimationNodeStateMachineTransition.new()
+	start_transition.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
+	machine.add_transition(&"Start", &"locomotion", start_transition)
 	var crossfade: AnimationNodeStateMachineTransition = AnimationNodeStateMachineTransition.new()
 	crossfade.xfade_time = CROSSFADE_SECONDS
 	for from_state: StringName in states:

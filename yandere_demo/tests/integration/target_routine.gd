@@ -49,6 +49,12 @@ func _ready() -> void:
 	_clock = SchoolClockModel.new(load(SCHEDULE_PATH) as ScheduleTable)
 	_target = (load(TARGET_SCENE_PATH) as PackedScene).instantiate() as TargetAI
 	add_child(_target)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var playback: AnimationNodeStateMachinePlayback = (_target.get_node(^"AnimationTree") as AnimationTree).get(&"parameters/playback")
+	if playback.get_current_node() != TargetAI.STATE_LOCOMOTION:
+		fail_test("a fresh target is not in locomotion but %s, so he stands in the rest pose" % playback.get_current_node())
+		return
 	_target.clock = _clock
 	_target.activity_started.connect(_on_activity_started)
 	_target.state_changed.connect(_on_state_changed)

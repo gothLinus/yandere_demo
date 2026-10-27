@@ -47,7 +47,7 @@ const RANDOM_SALT: StringName = &"target_ai"
 
 const HEAD_BONE: StringName = &"head"
 ## Eye midpoint in the head bone's space (+Y up the bone, +Z the way the face looks).
-const EYE_OFFSET: Vector3 = Vector3(0.0, 0.06, 0.08)
+const EYE_OFFSET: Vector3 = Vector3(0.0, 0.024, 0.094)
 const LOOK_DISTANCE: float = 2.0
 const STROLL_REACHED_DISTANCE: float = 0.5
 const PATH_END_TOLERANCE: float = 0.1

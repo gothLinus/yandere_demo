@@ -95,7 +95,7 @@ colliders = Array[StringName]([&"chest"])
 [sub_resource type="Resource" id="chain_skirt"]
 script = ExtResource("2_chain")
 chain_prefix = &"skirt"
-stiffness = 4.0
+stiffness = 6.0
 drag = 0.55
 gravity = 0.1
 radius = 0.025
@@ -141,9 +141,9 @@ rotation_offset = Quaternion(0, 0, 0, 1)
 [sub_resource type="Resource" id="collider_hips"]
 script = ExtResource("3_collider")
 bone = &"hips"
-radius = 0.0695
-height = 0.139
-position_offset = Vector3(0, 0.004, -0.0248)
+radius = 0.0729
+height = 0.2842
+position_offset = Vector3(0, -0.0366, -0.0174)
 rotation_offset = Quaternion(0, 0, 0, 1)
 
 [sub_resource type="Resource" id="collider_chest"]

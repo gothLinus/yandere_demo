@@ -27,6 +27,8 @@ const HEIGHT_BIN_METERS: float = 0.02
 const EDGE_BINS: int = 2
 const BRAID_PREFIX: StringName = &"braid"
 const BOW_PREFIX: StringName = &"braid_bow"
+## The model's braid bow is part of its hair mesh, skinned to the braid_bow_NN loops.
+const BOW_MESH: String = "TargetHair"
 const FIX_BRAID_ANIMATION: StringName = &"target_fix_braid"
 const LEG_BONES: Array[String] = ["thigh.L", "thigh.R", "shin.L", "shin.R"]
 
@@ -102,8 +104,8 @@ class Rig:
 		var skirt_top: float = skeleton.get_bone_global_rest(skeleton.find_bone("skirt_00_01")).origin.y
 		skirt = SkinnedVertices.new(model.find_child("TargetSkirt", true, false) as MeshInstance3D, skeleton,
 				func(_bone: String, _vertex: Vector3) -> bool: return true)
-		bow = SkinnedVertices.new(model.find_child("TargetAccessories", true, false) as MeshInstance3D, skeleton,
-				func(bone: String, _vertex: Vector3) -> bool: return bone == "braid_bow")
+		bow = SkinnedVertices.new(model.find_child(BOW_MESH, true, false) as MeshInstance3D, skeleton,
+				func(bone: String, _vertex: Vector3) -> bool: return bone.begins_with(BOW_PREFIX))
 		var keep_leg: Callable = func(bone: String, vertex: Vector3) -> bool:
 			return LEG_BONES.has(bone) and vertex.y < skirt_top
 		for mesh_name: String in ["TargetBody", "TargetSocks"]:

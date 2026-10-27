@@ -17,6 +17,9 @@ const REQUIRED_MESHES: Array[String] = [
 	"TargetBody", "TargetFace", "TargetHair", "TargetTop", "TargetSkirt", "TargetSocks", "TargetShoes",
 ]
 const SHADOWLESS_MESHES: Array[String] = ["TargetHair"]
+const EYE_MATERIAL_NAME: String = "M_Eye"
+const EYE_TOLERANCE: float = 0.015
+const FACE_FORWARD_DOT: float = 0.99
 const PROXY_MATERIAL_NAME: String = "M_CollisionProxy"
 const ANIMATION_FPS: float = 30.0
 # Clip name -> frame count at 30 fps.
@@ -132,3 +135,37 @@ func _assert_animations(root: Node) -> void:
 	for animation_name: StringName in player.get_animation_list():
 		var expected_loop: Animation.LoopMode = Animation.LOOP_NONE if ONE_SHOT_ANIMATIONS.has(animation_name) else Animation.LOOP_LINEAR
 		assert_eq(player.get_animation(animation_name).loop_mode, expected_loop, "%s loop mode" % animation_name)
+
+
+## TargetAI.head_position() is the head bone's rest frame times EYE_OFFSET, so it must land between the eyes.
+func test_eye_offset_sits_between_the_eyes() -> void:
+	if not ResourceLoader.exists(TARGET_SCENE_PATH):
+		return
+	var root: Node = (load(TARGET_SCENE_PATH) as PackedScene).instantiate()
+	var skeleton: Skeleton3D = root.find_child("Skeleton3D", true, false) as Skeleton3D
+	var face: MeshInstance3D = root.find_child(FACE_MESH, true, false) as MeshInstance3D
+	assert_true(skeleton != null and face != null, "the skeleton and %s exist" % FACE_MESH)
+	if skeleton == null or face == null:
+		root.free()
+		return
+	var eye_bounds: AABB = AABB()
+	var found: bool = false
+	for surface_index: int in face.mesh.get_surface_count():
+		var material: Material = face.get_active_material(surface_index)
+		if material == null or material.resource_name != EYE_MATERIAL_NAME:
+			continue
+		var vertices: PackedVector3Array = face.mesh.surface_get_arrays(surface_index)[Mesh.ARRAY_VERTEX]
+		for vertex: Vector3 in vertices:
+			var point: Vector3 = face.transform * vertex
+			eye_bounds = AABB(point, Vector3.ZERO) if not found else eye_bounds.expand(point)
+			found = true
+	assert_true(found, "%s has an %s surface" % [FACE_MESH, EYE_MATERIAL_NAME])
+	if found:
+		var head_rest: Transform3D = skeleton.get_bone_global_rest(skeleton.find_bone(TargetAI.HEAD_BONE))
+		var eye_point: Vector3 = head_rest * TargetAI.EYE_OFFSET
+		var eye_center: Vector3 = eye_bounds.get_center()
+		assert_true(eye_point.distance_to(eye_center) < EYE_TOLERANCE,
+				"the eye point %s lies within %.3f m of the eyes' centre %s" % [eye_point, EYE_TOLERANCE, eye_center])
+		assert_true((head_rest.basis * Vector3.BACK).dot(Vector3.BACK) > FACE_FORWARD_DOT,
+				"the head bone's +Z is the face's forward axis (glTF +Z)")
+	root.free()

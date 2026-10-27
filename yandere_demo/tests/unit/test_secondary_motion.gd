@@ -3,8 +3,8 @@ extends TestCase
 const TUNING_PATH: String = "res://data/secondary_motion.tres"
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
 # Chain prefix -> [stiffness, drag, gravity, radius, influence]: the Task 23a starting values on the Astolfo chains
-# (Task 23c tunes them). Braid, bow and skirt keep the ruling R10 values, measured by
-# tests/integration/target_secondary_motion.
+# (Task 23c tunes them). Braid and bow keep the ruling R10 values; the skirt is stiffer (6.0) so the Astolfo legs stay
+# inside it in a stride, both measured by tests/integration/target_secondary_motion.
 const EXPECTED_CHAINS: Dictionary[StringName, Array] = {
 	&"braid": [3.0, 0.5, 0.2, 0.03, 0.3],
 	&"hair_front": [1.6, 0.35, 0.3, 0.015, 1.0],
@@ -12,7 +12,7 @@ const EXPECTED_CHAINS: Dictionary[StringName, Array] = {
 	&"hair_back": [1.2, 0.4, 0.5, 0.02, 1.0],
 	&"head_bow": [2.5, 0.5, 0.2, 0.015, 1.0],
 	&"ribbon": [1.0, 0.45, 0.6, 0.015, 1.0],
-	&"skirt": [4.0, 0.55, 0.1, 0.025, 0.3],
+	&"skirt": [6.0, 0.55, 0.1, 0.025, 0.3],
 	&"braid_bow": [3.0, 0.4, 0.2, 0.02, 0.3],
 }
 # The hands hold the braid in target_fix_braid, so its springs let go for that clip.
@@ -54,7 +54,7 @@ const EXPECTED_END_BONE_LENGTHS: Dictionary[StringName, float] = {
 const EXPECTED_COLLIDER_RADII: Dictionary[StringName, float] = {
 	&"thigh.L": 0.0487,
 	&"thigh.R": 0.0433,
-	&"hips": 0.0695,
+	&"hips": 0.0729,
 	&"chest": 0.0749,
 	&"head": 0.085,
 }
