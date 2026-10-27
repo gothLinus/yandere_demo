@@ -92,6 +92,9 @@ class Stance:
     # Seated, the knee pole's outward share in the body's frame (negative brings the knees together); None keeps
     # KNEE_SPLAY in each foot's frame.
     seated_knee_splay: float | None = None
+    # With `seated_knee_splay` set: the standing knee pole's outward share in the body's frame, which the seated one
+    # blends from as the hips go down; None keeps KNEE_SPLAY in each foot's frame.
+    standing_knee_splay: float | None = None
 
 
 @dataclass
@@ -312,7 +315,10 @@ def _knee_splay(stance: Stance, placement, side: str, lowered: float) -> float:
         return KNEE_SPLAY
     yaw = math.radians(placement.yaw_degrees)
     seated_splay = (stance.seated_knee_splay - side_sign(side) * math.sin(yaw)) / math.cos(yaw)
-    return lerp(KNEE_SPLAY, seated_splay, lowered)
+    standing_splay = KNEE_SPLAY
+    if stance.standing_knee_splay is not None:
+        standing_splay = (stance.standing_knee_splay - side_sign(side) * math.sin(yaw)) / math.cos(yaw)
+    return lerp(standing_splay, seated_splay, lowered)
 
 
 def _pose_arm(rig: CharacterRig, pose: Pose, side: str, arm: ArmSpec) -> None:

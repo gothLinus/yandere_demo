@@ -7,15 +7,18 @@ Standing clips start from the target's idle stance and seated clips from his sea
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import bpy
-from mathutils import Quaternion, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 from . import animation
-from .animation import SIDES, Curve, FootPlacement, GaitParams, WalkCycle, forward_kinematics, side_sign
+from .animation import (
+    SIDES, Curve, FootPlacement, GaitParams, Pose, WalkCycle, curl_fingers, forward_kinematics, palm_normal, side_sign,
+    tail_position,
+)
 from .character_animation import (
-    ArmSpec, BodySpec, CharacterRig, Stance, add_degrees, compose, palm_on, poses_for, sit_down_curves,
+    ArmSpec, BodySpec, CharacterRig, Stance, add_degrees, compose, lap_pole, palm_on, poses_for, sit_down_curves,
     sit_transition_body, stand_up_curves,
 )
 
@@ -25,9 +28,11 @@ WALK = GaitParams(speed=1.3, frame_count=32, feet_x=0.052, swing_lift=0.036, swi
                   hips_bob=0.015, hips_sway=0.019, pelvis_yaw_degrees=5.5, pelvis_roll_degrees=4.5)
 
 SEATED_KNEE_SPLAY = -0.05
+# Standing, his knees point straight ahead, so they stay together all the way down into the seat and back up.
+STANDING_KNEE_SPLAY = 0.0
 SEATED_FRONT_DROP = 1.0
 # Foot placements as (x, y, yaw, heel pitch) offsets from the rest ankles, so they fit any build of legs.
-IDLE_FEET = {".L": (0.001, -0.008, 7.0, 0.0), ".R": (-0.009, -0.048, -12.0, 0.0)}
+IDLE_FEET = {".L": (-0.006, -0.008, 7.0, 0.0), ".R": (0.006, -0.048, -12.0, 0.0)}
 # The cradling hand is this far down the braid (fraction of its length); the stroking hand runs between the next two.
 BRAID_CRADLE_FRACTION = 0.54
 BRAID_STROKE_FRACTIONS = (0.32, 0.51)
@@ -65,6 +70,7 @@ def target_stance(rest_ankles: dict, mouth: Vector, hanging_bones: tuple, seat_c
         skirt_sample_allowances=True,
         # Seated with the short skirt, the knees come together (addendum §3.6).
         seated_knee_splay=SEATED_KNEE_SPLAY,
+        standing_knee_splay=STANDING_KNEE_SPLAY,
         seated_front_drop=SEATED_FRONT_DROP,
         mouth=mouth,
         hanging_bones=hanging_bones,
@@ -127,6 +133,284 @@ def acting_idle(rig: CharacterRig, frame: float, period: float) -> BodySpec:
     spec.head = add_degrees(spec.head, (0.0, -0.9 * wave(frame, period, 0.16), 0.0))
     for side in SIDES:
         graceful_hand(spec.arms[side], frame / period + (0.0 if side == ".L" else 0.4))
+    return spec
+
+
+# ---------------------------------------------------------------------------------------------------
+# Props (ruling R9). Each grip is a holding hand's palm frame in the prop's own frame, the frame TargetProps builds the
+# prop's meshes in (+Y up its length, +Z out of a book's pages or a phone's screen, a can's or a handle's axis on Y).
+# A palm frame is (across, fingers, normal) about the palm skin point; the fingers run from the wrist to the knuckles
+# and the normal leaves the palm. The attachment hand's grip gives the prop's placement on that hand bone
+# (`prop_placements`), and the clips pose the hands from the prop's frame (`hold`).
+
+PALM_CENTRE_SHARE = 0.6
+PALM_SKIN_DEPTH = 0.017
+# A finger joint stops curling once it is this close to the prop's surface (half a finger's thickness).
+FINGER_CONTACT = 0.008
+FINGER_CURL_STEP = 3.0
+FINGER_CURL_LIMIT = 200.0
+
+BOOK_LEAF_SIZE = Vector((0.14, 0.2, 0.012))
+# Each leaf of the open book turns this far toward the reader from the flat spread.
+BOOK_OPEN_DEGREES = 12.0
+PHONE_SIZE = Vector((0.07, 0.14, 0.009))
+CAN_RADIUS = 0.033
+CAN_HEIGHT = 0.12
+BROOM_HANDLE_RADIUS = 0.012
+BROOM_HANDLE_LENGTH = 1.08
+BROOM_HEAD_HEIGHT = 0.12
+# The left hand grips the handle this far below its top, the right hand this far further down.
+BROOM_TOP_GRIP = 0.16
+BROOM_GRIP_SPACING = 0.34
+
+
+def oriented_frame(origin: Vector, fingers: Vector, normal: Vector) -> Matrix:
+    """A palm frame: columns (across, fingers, normal) at `origin`; `fingers` is made square to `normal`."""
+    normal = Vector(normal).normalized()
+    fingers = Vector(fingers)
+    fingers = (fingers - normal * fingers.dot(normal)).normalized()
+    matrix = Matrix((fingers.cross(normal), fingers, normal)).transposed().to_4x4()
+    matrix.translation = origin
+    return matrix
+
+
+def bone_matrix(skeleton, bone: str) -> Matrix:
+    matrix = skeleton.rest_rotations[bone].to_matrix().to_4x4()
+    matrix.translation = skeleton.heads[bone]
+    return matrix
+
+
+def palm_local(skeleton, side: str) -> Matrix:
+    """The palm frame in the hand bone's frame (the same in Blender and Godot)."""
+    hand = f"hand{side}"
+    head = skeleton.heads[hand]
+    knuckles = sum((skeleton.heads[f"{finger}_01{side}"] for finger in FINGERS), Vector()) / len(FINGERS)
+    along = (knuckles - head).normalized()
+    inward = Vector((-side_sign(side), 0.0, 0.0))
+    normal = (inward - along * inward.dot(along)).normalized()
+    palm = oriented_frame(head.lerp(knuckles, PALM_CENTRE_SHARE) + normal * PALM_SKIN_DEPTH, along, normal)
+    return bone_matrix(skeleton, hand).inverted() @ palm
+
+
+def book_leaf(sign: float) -> Matrix:
+    """A leaf of the open book in the book's frame; sign +1 is the leaf on the reader's right."""
+    leaf = Matrix.Rotation(math.radians(-sign * BOOK_OPEN_DEGREES), 4, "Y")
+    leaf.translation = leaf.to_3x3() @ Vector((sign * BOOK_LEAF_SIZE.x * 0.5, 0.0, 0.0))
+    return leaf
+
+
+def _book_grip(sign: float) -> Matrix:
+    """The palm under the outer half of a leaf, against its back, fingers fanning up and out over the cover."""
+    leaf = book_leaf(sign)
+    point = leaf @ Vector((sign * 0.035, -0.04, -BOOK_LEAF_SIZE.z * 0.5))
+    rotation = leaf.to_3x3()
+    return oriented_frame(point, rotation @ Vector((sign * 0.4, 0.92, 0.0)), rotation @ Vector((0.0, 0.0, 1.0)))
+
+
+BACK_TO_FRONT = Vector((0.0, 0.0, 1.0))
+GRIPS = {
+    "book": {".R": _book_grip(1.0), ".L": _book_grip(-1.0)},
+    "phone": {".R": oriented_frame(Vector((0.0, -0.012, -PHONE_SIZE.z * 0.5)), Vector((-0.3, 0.95, 0.0)), BACK_TO_FRONT)},
+    "can": {".R": oriented_frame(Vector((0.0, 0.004, -CAN_RADIUS)), Vector((1.0, 0.0, 0.0)), BACK_TO_FRONT)},
+    "broom": {
+        ".L": oriented_frame(Vector((0.0, -BROOM_TOP_GRIP, -BROOM_HANDLE_RADIUS)), Vector((1.0, 0.0, 0.0)), BACK_TO_FRONT),
+        ".R": oriented_frame(Vector((0.0, -BROOM_TOP_GRIP - BROOM_GRIP_SPACING, BROOM_HANDLE_RADIUS)),
+                             Vector((-1.0, 0.0, 0.0)), -BACK_TO_FRONT),
+    },
+}
+# The bone each prop hangs from in Godot (TargetProps.PROP_BONES).
+PROP_HANDS = {"book": ".R", "phone": ".R", "can": ".R", "broom": ".L"}
+
+
+def prop_placements(skeleton) -> dict:
+    """Each prop's frame in its attachment hand bone's frame: TargetProps.PROP_PLACEMENTS."""
+    return {prop: palm_local(skeleton, side) @ GRIPS[prop][side].inverted() for prop, side in PROP_HANDS.items()}
+
+
+def godot_prop_placements(skeleton) -> str:
+    """PROP_PLACEMENTS for scripts/target_props.gd: a hand bone's frame is the same in Blender and Godot."""
+    lines = []
+    for prop, placement in prop_placements(skeleton).items():
+        columns = [placement.col[index].xyz for index in range(3)]
+        vectors = ", ".join("Vector3(%s)" % ", ".join(f"{value:.4f}" for value in column) for column in columns)
+        origin = ", ".join(f"{value:.4f}" for value in placement.translation)
+        lines.append(f"\t{prop.upper()}: Transform3D(Basis({vectors}),\n\t\t\tVector3({origin})),")
+    return "\n".join(lines)
+
+
+def hand_for_palm(skeleton, side: str, palm: Matrix) -> tuple[Vector, tuple]:
+    """Armature-space wrist and aim that put the palm frame at `palm`."""
+    hand = f"hand{side}"
+    hand_frame = palm @ palm_local(skeleton, side).inverted()
+    delta = hand_frame.to_quaternion() @ skeleton.rest_rotations[hand].inverted()
+    return hand_frame.translation.copy(), (delta @ skeleton.direction(hand), delta @ palm_normal(skeleton, side))
+
+
+def hold(rig: CharacterRig, arm: ArmSpec, side: str, palm: Matrix, pole: Vector) -> None:
+    """Pose an arm (world space) so its palm frame lands on `palm`."""
+    arm.wrist, arm.aim = hand_for_palm(rig.skeleton, side, palm)
+    arm.pole = pole
+    arm.aim_weight = 1.0
+    arm.world_space = True
+
+
+def hold_prop(rig: CharacterRig, arm: ArmSpec, side: str, prop: str, prop_frame: Matrix, pole: Vector) -> None:
+    hold(rig, arm, side, prop_frame @ GRIPS[prop][side], pole)
+
+
+def _cylinder_distance(point: Vector, radius: float, low: float, high: float) -> float:
+    radial = Vector((point.x, point.z)).length - radius
+    vertical = max(low - point.y, point.y - high)
+    return Vector((max(radial, 0.0), max(vertical, 0.0))).length + min(max(radial, vertical), 0.0)
+
+
+def _box_distance(point: Vector, half_size: Vector) -> float:
+    outside = Vector((abs(point.x) - half_size.x, abs(point.y) - half_size.y, abs(point.z) - half_size.z))
+    return Vector((max(outside.x, 0.0), max(outside.y, 0.0), max(outside.z, 0.0))).length + min(max(outside), 0.0)
+
+
+def prop_distance(prop: str, point: Vector) -> float:
+    """Signed distance from a point in the prop's frame to its surface (negative inside)."""
+    if prop == "can":
+        return _cylinder_distance(point, CAN_RADIUS, -CAN_HEIGHT * 0.5, CAN_HEIGHT * 0.5)
+    if prop == "broom":
+        return _cylinder_distance(point, BROOM_HANDLE_RADIUS, -BROOM_HANDLE_LENGTH, 0.0)
+    if prop == "phone":
+        return _box_distance(point, PHONE_SIZE * 0.5)
+    return min(_box_distance(book_leaf(sign).inverted() @ point, BOOK_LEAF_SIZE * 0.5) for sign in (1.0, -1.0))
+
+
+def wrap_curls(skeleton, side: str, prop: str) -> dict:
+    """Per-finger curls that close each finger round the prop until it touches: index..pinky -> degrees."""
+    hand_to_prop = GRIPS[prop][side] @ palm_local(skeleton, side).inverted() @ bone_matrix(skeleton, f"hand{side}").inverted()
+    curls = {}
+    for finger in FINGERS:
+        chain = [f"{finger}_0{index}{side}" for index in (1, 2, 3)]
+        curl = 0.0
+        while curl < FINGER_CURL_LIMIT:
+            pose = Pose()
+            curl_fingers(skeleton, pose, side, 0.0, 0.0, {finger: curl})
+            world, heads = forward_kinematics(skeleton, pose)
+            joints = [heads[chain[1]], heads[chain[2]], tail_position(skeleton, world, heads, chain[2])]
+            if min(prop_distance(prop, hand_to_prop @ joint) for joint in joints) <= FINGER_CONTACT:
+                break
+            curl += FINGER_CURL_STEP
+        curls[finger] = curl
+    return curls
+
+
+def eyes(rig: CharacterRig, pose) -> Vector:
+    """Armature-space point between the eyes (a little above the measured mouth)."""
+    world, heads = forward_kinematics(rig.skeleton, pose)
+    origin, rotation = heads["chest"], world["chest"]
+    return origin + rotation @ (rig.mouth(pose) + Vector((0.0, 0.0, 0.06)))
+
+
+def facing_frame(origin: Vector, up: Vector, toward: Vector) -> Matrix:
+    """A prop frame at `origin` whose +Z faces `toward` and +Y leans to `up`."""
+    normal = (toward - origin).normalized()
+    up = (up - normal * up.dot(normal)).normalized()
+    matrix = Matrix((up.cross(normal), up, normal)).transposed().to_4x4()
+    matrix.translation = origin
+    return matrix
+
+
+def blend_frames(first: Matrix, second: Matrix, weight: float) -> Matrix:
+    rotation = first.to_quaternion().slerp(second.to_quaternion(), weight).to_matrix().to_4x4()
+    rotation.translation = first.translation.lerp(second.translation, weight)
+    return rotation
+
+
+def hand_palm(rig: CharacterRig, pose, side: str) -> Matrix:
+    """Where a pose puts a hand's palm frame (armature space)."""
+    world, heads = forward_kinematics(rig.skeleton, pose)
+    hand = f"hand{side}"
+    matrix = (world[hand] @ rig.skeleton.rest_rotations[hand]).to_matrix().to_4x4()
+    matrix.translation = heads[hand]
+    return matrix @ palm_local(rig.skeleton, side)
+
+
+# The palm rides this far out from the thigh's axis (thigh radius forward, plus the skirt over it).
+THIGH_PALM_CLEARANCE = 0.012
+
+
+def thigh_palm(rig: CharacterRig, pose, side: str, fraction: float, inward: float, turn_in: float) -> Matrix:
+    """A palm lying on the front of the thigh (its top when seated), `fraction` of the way to the knee, fingers along
+    the thigh and turned `turn_in` toward the middle (0..1)."""
+    _, heads = forward_kinematics(rig.skeleton, pose)
+    hip, knee = heads[f"thigh{side}"], heads[f"shin{side}"]
+    along = (knee - hip).normalized()
+    front = along.cross(Vector((1.0, 0.0, 0.0))).normalized()
+    radii = rig.stance.seated_leg_radii or rig.stance.leg_radii
+    radius = radii[0] + (radii[1] - radii[0]) * fraction + THIGH_PALM_CLEARANCE
+    middle = Vector((-side_sign(side), 0.0, 0.0))
+    point = hip.lerp(knee, fraction) + front * radius + middle * inward
+    return oriented_frame(point, along.lerp(middle, turn_in * 0.4), -front + middle * 0.12)
+
+
+def acting_seated(rig: CharacterRig, frame_number: float, period: float) -> BodySpec:
+    """The seated idle with a slow weight shift from one buttock to the other that the chest and head follow late,
+    and a breath that rocks the pelvis."""
+    spec = rig.seated_idle(frame_number, period)
+    shift = wave(frame_number, period)
+    spec.hips_offset += Vector((0.0035 * shift, 0.0015 * wave(frame_number, period, 0.25, 2.0), 0.0))
+    spec.hips = add_degrees(spec.hips, (0.6 * wave(frame_number, period, 0.25, 2.0), -1.0 * shift, 0.0))
+    spec.chest = add_degrees(spec.chest, (0.0, 0.8 * wave(frame_number, period, 0.08), 0.0))
+    spec.head = add_degrees(spec.head, (0.0, -0.9 * wave(frame_number, period, 0.16), 0.0))
+    return spec
+
+
+LAP_FRACTION = 0.55
+LAP_INWARD = 0.03
+LAP_TURN_IN = 0.5
+
+
+def lap_hands(rig: CharacterRig, spec: BodySpec, sides: tuple = SIDES, phase: float = 0.0) -> None:
+    """Both palms resting on the thighs near the middle, fingers toward the knees, holding the skirt down."""
+    pose = compose(rig, spec)
+    for side in sides:
+        arm = spec.arms[side]
+        hold(rig, arm, side, thigh_palm(rig, pose, side, LAP_FRACTION, LAP_INWARD, LAP_TURN_IN), lap_pole(side))
+        arm.finger_curls = finger_fan(12.0, 5.0, 3.0, phase + (0.0 if side == ".L" else 0.3))
+        arm.thumb = 16.0
+        arm.splay = -2.0
+
+
+def idle_palm(rig: CharacterRig, spec: BodySpec, side: str) -> Matrix:
+    """Where the idle arm would put the palm on this frame's body."""
+    hanging = replace(spec, arms={other: replace(rig.stance.idle_arm) for other in SIDES})
+    return hand_palm(rig, compose(rig, hanging), side)
+
+
+# Sitting down, the hands come forward to the front of the skirt (holding it down over the thighs) as the knees bend,
+# then ride the thighs onto the lap. Standing up they push off the lap, slide back up the thighs and let go.
+SIT_DOWN_HANDS = Curve([(0, 0.0), (5, 0.0), (13, 1.0), (30, 1.0)])
+SIT_DOWN_SLIDE = Curve([(0, 0.25), (13, 0.25), (24, LAP_FRACTION - 0.02), (30, LAP_FRACTION)])
+SIT_DOWN_GLANCE = Curve([(0, 0.0), (3, 1.0), (9, 1.0), (15, 0.0), (30, 0.0)])
+STAND_UP_HANDS = Curve([(0, 1.0), (16, 1.0), (25, 0.0), (30, 0.0)])
+STAND_UP_SLIDE = Curve([(0, LAP_FRACTION), (6, LAP_FRACTION - 0.08), (16, 0.3), (30, 0.25)])
+
+
+def clip_sit_transition(rig: CharacterRig, frame_number: float, curves: dict, hands: Curve, slide: Curve,
+                        glance: Curve | None = None) -> BodySpec:
+    spec = sit_transition_body(rig, frame_number, curves)
+    if glance is not None:
+        # Before sitting he glances back over his shoulder at the seat: the head leads, the neck and chest follow.
+        spec.head = add_degrees(spec.head, (6.0 * glance.scalar(frame_number), -4.0 * glance.scalar(frame_number),
+                                            -24.0 * glance.scalar(frame_number)))
+        spec.neck = add_degrees(spec.neck, (0.0, 0.0, -9.0 * glance.scalar(frame_number - 2.0)))
+        spec.chest = add_degrees(spec.chest, (0.0, 0.0, -4.0 * glance.scalar(frame_number - 4.0)))
+    reach = hands.scalar(frame_number)
+    fraction = slide.scalar(frame_number)
+    pose = compose(rig, spec)
+    for side in SIDES:
+        on_thigh = thigh_palm(rig, pose, side, fraction, LAP_INWARD * reach, LAP_TURN_IN * reach)
+        palm = blend_frames(idle_palm(rig, spec, side), on_thigh, reach)
+        arm = spec.arms[side]
+        hold(rig, arm, side, palm, Vector((side_sign(side) * 0.7, 0.5, -0.4)).lerp(lap_pole(side), reach))
+        arm.finger_curls = finger_fan(12.0 + 4.0 * (1.0 - reach), 5.0, 3.0 * reach, frame_number / 30.0)
+        arm.thumb = 16.0 - 2.0 * (1.0 - reach)
+        arm.splay = -2.0 * reach
     return spec
 
 
@@ -289,67 +573,94 @@ def clip_look_around(rig: CharacterRig, frame: float) -> BodySpec:
     return spec
 
 
-def clip_sit(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.seated_idle(frame, 90.0)
-    phase = frame / 90.0
-    for side in SIDES:
-        drift = 0.006 * math.sin(2.0 * math.pi * (phase - (0.1 if side == ".L" else 0.4)))
-        spec.arms[side].wrist = spec.arms[side].wrist + Vector((0.0, drift, 0.0))
+SIT_GLANCE = Curve([(0, 0.0), (28, 0.0), (36, 1.0), (52, 1.0), (60, 0.0), (90, 0.0)], period=90.0)
+# The right heel lifts off the floor twice, a small restless tap.
+SIT_TAP = Curve([(0, 0.0), (62, 0.0), (66, 1.0), (70, 0.2), (74, 1.0), (80, 0.0), (90, 0.0)], period=90.0)
+
+
+def clip_sit(rig: CharacterRig, frame_number: float) -> BodySpec:
+    spec = acting_seated(rig, frame_number, 90.0)
+    look = SIT_GLANCE.scalar(frame_number + 1.0)
+    spec.head = add_degrees(spec.head, (-2.0 * look, 3.0 * look, 16.0 * look))
+    spec.neck = add_degrees(spec.neck, (0.0, 0.0, 6.0 * SIT_GLANCE.scalar(frame_number - 2.0)))
+    spec.chest = add_degrees(spec.chest, (0.0, 0.0, 3.0 * SIT_GLANCE.scalar(frame_number - 5.0)))
+    x, y, yaw, pitch = IDLE_FEET[".R"]
+    spec.feet = rig_feet(rig, {**IDLE_FEET, ".R": (x, y, yaw, pitch + 8.0 * SIT_TAP.scalar(frame_number))})
+    lap_hands(rig, spec, phase=frame_number / 90.0)
     return spec
 
 
-READ_PAGE_TURN = Curve([(0, 0.0), (66, 0.0), (76, 1.0), (82, 1.0), (94, 0.0), (120, 0.0)], period=120.0)
-READ_HEAD = Curve([(0, 0.0), (20, 1.5), (45, -0.5), (66, 0.5), (80, 3.0), (100, 0.0), (120, 0.0)], period=120.0)
+# The left hand leaves its leaf, crosses to the right leaf's top corner and turns the page back over.
+READ_PAGE = Curve([(0, 0.0), (72, 0.0), (82, 1.0), (86, 1.0), (98, 0.0), (120, 0.0)], period=120.0)
+READ_GLANCE = Curve([(0, 0.0), (20, 1.5), (45, -0.5), (66, 0.5), (80, 3.0), (100, 0.0), (120, 0.0)], period=120.0)
+# The open book's centre: above the middle of the lap and toward the knees, its pages turned up to the eyes.
+BOOK_FROM_LAP = Vector((0.0, -0.05, 0.11))
+PAGE_PICK = Vector((0.12, 0.07, 0.03))
 
 
-def clip_sit_read(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.seated_idle(frame, 120.0)
-    phase = frame / 120.0
-    page = READ_PAGE_TURN.scalar(frame)
+def clip_sit_read(rig: CharacterRig, frame_number: float) -> BodySpec:
+    spec = acting_seated(rig, frame_number, 120.0)
+    phase = frame_number / 120.0
+    page = READ_PAGE.scalar(frame_number)
+    # Reading along the lines: the head drifts across a line and flicks back, looks after the turning hand.
+    line = (phase * 6.0) % 1.0
+    scan = 2.0 * (line - 0.5) if line < 0.85 else 2.0 * (0.35 - (line - 0.85) / 0.15 * 0.85)
     spec.spine = add_degrees(spec.spine, (3.0, 0.0, 0.0))
     spec.chest = add_degrees(spec.chest, (4.0, 0.0, 0.0))
     spec.neck = add_degrees(spec.neck, (9.0, 0.0, 0.0))
-    spec.head = add_degrees(spec.head, (13.0 + 0.8 * math.sin(2.0 * math.pi * phase * 2.0), 1.0, 2.0 * READ_HEAD.scalar(frame)))
-    book_center = Vector((0.0, -0.24, -0.03))
-    left = spec.arms[".L"]
-    left.wrist = book_center + Vector((0.085, 0.015, -0.01))
-    left.pole = Vector((0.7, 0.5, -0.5))
-    left.aim = ((-0.25, -0.35, 0.9), (-0.85, 0.35, 0.3))
-    left.fingers, left.thumb = 30.0, 25.0
+    spec.head = add_degrees(spec.head, (13.0 + 0.8 * wave(frame_number, 120.0, 0.0, 2.0), 1.0,
+                                        -1.5 * scan * (1.0 - page) + 2.0 * READ_GLANCE.scalar(frame_number) - 4.0 * page))
+    pose = compose(rig, spec)
+    lap = (rig.lap_point(pose, ".L") + rig.lap_point(pose, ".R")) * 0.5
+    book = facing_frame(lap + BOOK_FROM_LAP, Vector((0.0, 0.0, 1.0)), eyes(rig, pose))
     right = spec.arms[".R"]
-    turn_target = book_center + Vector((0.035, -0.025, 0.035))
-    right.wrist = (book_center + Vector((-0.085, 0.015, -0.01))).lerp(turn_target, page)
-    right.wrist.z += 0.03 * math.sin(math.pi * page)
-    right.pole = Vector((-0.7, 0.5, -0.5))
-    right.aim = ((0.25 + 0.4 * page, -0.35, 0.9 - 0.3 * page), (0.85, 0.35, 0.3))
-    right.fingers, right.thumb = 30.0 - 12.0 * page, 25.0
+    hold_prop(rig, right, ".R", "book", book, Vector((-0.8, 0.4, -0.5)))
+    right.finger_curls = finger_fan(6.0, 3.0, 1.5, phase)
+    right.thumb = 40.0
+    left = spec.arms[".L"]
+    held = book @ GRIPS["book"][".L"]
+    pick = book @ oriented_frame(PAGE_PICK, Vector((0.3, 0.9, -0.2)), Vector((0.0, 0.0, -1.0)))
+    turning = blend_frames(held, pick, page)
+    turning.translation += book.to_3x3() @ Vector((0.0, 0.0, 0.04 * math.sin(math.pi * page)))
+    hold(rig, left, ".L", turning, Vector((0.8, 0.4, -0.5)))
+    left.finger_curls = finger_fan(6.0 + 10.0 * page, 3.0, 1.5, phase + 0.3)
+    left.thumb = 40.0 - 25.0 * page
+    left.splay = -2.0 * page
     return spec
 
 
 PHONE_SCROLL = Curve([(0, 0.0), (18, 0.0), (22, 1.0), (26, 0.0), (48, 0.0), (52, 1.0), (56, 0.0), (90, 0.0), (94, 1.0),
                       (98, 0.0), (120, 0.0)], period=120.0)
-PHONE_LIFT = Curve([(0, 0.0), (58, 0.0), (70, 1.0), (84, 1.0), (98, 0.0), (120, 0.0)], period=120.0)
+# Something on the screen: he lifts the phone closer, then giggles at it (the shoulders bounce) and lowers it again.
+PHONE_LIFT = Curve([(0, 0.0), (58, 0.0), (68, 1.0), (86, 1.0), (98, 0.0), (120, 0.0)], period=120.0)
+PHONE_GIGGLE = Curve([(0, 0.0), (70, 0.0), (73, 1.0), (84, 1.0), (88, 0.0), (120, 0.0)], period=120.0)
+PHONE_FROM_LAP = Vector((-0.035, -0.06, 0.17))
+# The fingers curl round the phone's far edge.
+PHONE_CURLS = {"index": 48.0, "middle": 54.0, "ring": 58.0, "pinky": 62.0}
+PHONE_TOWARD_EYES = 0.3
 
 
-def clip_phone(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.seated_idle(frame, 120.0)
-    lift = PHONE_LIFT.scalar(frame)
+def clip_phone(rig: CharacterRig, frame_number: float) -> BodySpec:
+    spec = acting_seated(rig, frame_number, 120.0)
+    phase = frame_number / 120.0
+    lift = PHONE_LIFT.scalar(frame_number)
+    giggle = PHONE_GIGGLE.scalar(frame_number) * (0.5 + 0.5 * math.sin(2.0 * math.pi * (frame_number - 70.0) / 5.0))
     spec.spine = add_degrees(spec.spine, (2.0, 0.0, 0.0))
-    spec.chest = add_degrees(spec.chest, (3.0 - 1.5 * lift, 0.0, 0.0))
+    spec.chest = add_degrees(spec.chest, (3.0 - 1.5 * lift + 1.5 * giggle, 0.0, 0.0))
     spec.neck = add_degrees(spec.neck, (10.0 - 3.0 * lift, 0.0, -2.0))
-    spec.head = add_degrees(spec.head, (14.0 - 5.0 * lift, -3.0 * lift, -3.0))
+    spec.head = add_degrees(spec.head, (14.0 - 5.0 * lift + 1.5 * giggle, -3.0 * lift, -3.0))
+    for side in SIDES:
+        spec.arms[side].shoulder = (0.0, 3.0 * giggle, 0.0)
+    lap_hands(rig, spec, (".L",), phase)
+    pose = compose(rig, spec)
+    lap = (rig.lap_point(pose, ".L") + rig.lap_point(pose, ".R")) * 0.5
+    look = eyes(rig, pose)
+    centre = (lap + PHONE_FROM_LAP).lerp(look, PHONE_TOWARD_EYES * lift)
+    phone = facing_frame(centre, Vector((0.0, 0.0, 1.0)), look)
     right = spec.arms[".R"]
-    right.wrist = Vector((-0.06, -0.22, -0.02)) + Vector((0.01, -0.02, 0.05)) * lift
-    right.pole = Vector((-0.8, 0.4, -0.5))
-    right.aim = ((0.35, -0.3, 0.9), (0.25, 0.9, -0.2))
-    right.fingers = 40.0
-    right.thumb = 12.0 + 22.0 * PHONE_SCROLL.scalar(frame)
-    left = spec.arms[".L"]
-    left.wrist = Vector((0.03, -0.21, -0.06)) + Vector((-0.01, -0.02, 0.05)) * lift
-    left.pole = Vector((0.8, 0.4, -0.5))
-    left.aim = ((-0.4, -0.4, 0.8), (-0.4, 0.8, -0.3))
-    left.fingers = 35.0
-    left.thumb = 20.0
+    hold_prop(rig, right, ".R", "phone", phone, Vector((-0.8, 0.4, -0.5)))
+    right.finger_curls = PHONE_CURLS
+    right.thumb = 20.0 + 25.0 * PHONE_SCROLL.scalar(frame_number)
     return spec
 
 
@@ -711,8 +1022,10 @@ def target_clips(rig: CharacterRig, braid: BraidLayout, braid_resting: animation
         ("target_notice_player", 30, False, lambda frame: clip_notice_player(rig, frame, notice)),
         ("target_startled", 20, False, lambda frame: clip_startled(rig, frame, startled)),
         ("target_look_around", 120, True, lambda frame: clip_look_around(rig, frame)),
-        ("target_sit_down", 30, False, lambda frame: sit_transition_body(rig, frame, sit_down)),
-        ("target_stand_up", 30, False, lambda frame: sit_transition_body(rig, frame, stand_up)),
+        ("target_sit_down", 30, False,
+         lambda frame: clip_sit_transition(rig, frame, sit_down, SIT_DOWN_HANDS, SIT_DOWN_SLIDE, SIT_DOWN_GLANCE)),
+        ("target_stand_up", 30, False,
+         lambda frame: clip_sit_transition(rig, frame, stand_up, STAND_UP_HANDS, STAND_UP_SLIDE)),
         ("target_sit", 90, True, lambda frame: clip_sit(rig, frame)),
         ("target_sit_read", 120, True, lambda frame: clip_sit_read(rig, frame)),
         ("target_phone", 120, True, lambda frame: clip_phone(rig, frame)),

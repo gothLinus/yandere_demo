@@ -41,6 +41,7 @@ def main() -> None:
     target_animations.build_target_actions(armature, stance, astolfo.braid_layout(armature))
     scene.save_and_export(armature, BLEND_PATH, GLB_PATH)
     print(astolfo.secondary_motion_report(armature, meshes))
+    print("TargetProps.PROP_PLACEMENTS:\n" + target_animations.godot_prop_placements(animation.Skeleton(armature)))
     print(f"eyes at {tuple(round(value, 4) for value in landmarks.eyes)}, mouth at "
           f"{tuple(round(value, 4) for value in landmarks.mouth)}, seat clearance {stance.seat_clearance:.4f}, "
           f"heel back {stance.heel_back:.4f}, lap offset {tuple(round(value, 4) for value in stance.lap_offset)}, "
