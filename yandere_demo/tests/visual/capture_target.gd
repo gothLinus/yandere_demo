@@ -12,6 +12,13 @@ const PROP_ANIMATIONS: Array[StringName] = [&"target_sit_read", &"target_phone",
 const PROP_DISTANCE: float = 0.9
 const PROP_CAMERA_RISE: float = 0.15
 const SKELETON_PATH: NodePath = ^"Model/TargetChar/Skeleton3D"
+## Seated coverage (addendum §3.6): each seated pose seen from straight in front of the knees at a crouching player's
+## eye height and lower, as (clip, playback fraction).
+const SEATED_POSES: Array[Array] = [
+	[&"target_sit", 0.5], [&"target_sit_down", 1.0], [&"target_sit_read", 0.5], [&"target_phone", 0.5],
+]
+const SEATED_CAMERA_HEIGHTS: Array[float] = [0.9, 0.6]
+const SEATED_CAMERA_DISTANCE: float = 1.2
 const IDLE_STATE: StringName = &"target_idle"
 const PLAYBACK_PARAMETER: StringName = &"parameters/playback"
 const WALK_ANIMATION: StringName = &"target_walk_routine"
@@ -57,7 +64,27 @@ func _ready() -> void:
 	expression.set_expression(&"neutral", 0.0)
 	await _capture_walk_phases()
 	await _capture_props()
+	await _capture_seated()
 	finish()
+
+
+func _capture_seated() -> void:
+	var animation_player: AnimationPlayer = _target.get_node(^"Model/AnimationPlayer") as AnimationPlayer
+	var props: TargetProps = _target.get_node(^"TargetProps") as TargetProps
+	var skeleton: Skeleton3D = _target.get_node(SKELETON_PATH) as Skeleton3D
+	for seated_pose: Array in SEATED_POSES:
+		var animation_name: StringName = seated_pose[0]
+		animation_player.play(animation_name)
+		animation_player.seek(animation_player.current_animation_length * float(seated_pose[1]), true)
+		animation_player.pause()
+		props.show_for(animation_name)
+		await wait_frames(SPRING_SETTLE_FRAMES)
+		var knees: Vector3 = (skeleton.global_transform * skeleton.get_bone_global_pose(skeleton.find_bone("shin.L")).origin
+				+ skeleton.global_transform * skeleton.get_bone_global_pose(skeleton.find_bone("shin.R")).origin) * 0.5
+		for height: float in SEATED_CAMERA_HEIGHTS:
+			_aim(Vector3(knees.x, height, knees.z - SEATED_CAMERA_DISTANCE), knees)
+			await save_capture("%s_seated_front_%03d" % [animation_name, roundi(height * 100.0)])
+	props.show_for(&"")
 
 
 func _capture_props() -> void:

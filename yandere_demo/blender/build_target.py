@@ -44,7 +44,8 @@ def main() -> None:
     print(f"eyes at {tuple(round(value, 4) for value in landmarks.eyes)}, mouth at "
           f"{tuple(round(value, 4) for value in landmarks.mouth)}, seat clearance {stance.seat_clearance:.4f}, "
           f"heel back {stance.heel_back:.4f}, lap offset {tuple(round(value, 4) for value in stance.lap_offset)}, "
-          f"leg radii {tuple(round(value, 4) for value in stance.leg_radii)}")
+          f"leg radii {tuple(round(value, 4) for value in stance.leg_radii)}, seated leg radii "
+          f"{tuple(round(value, 4) for value in stance.seated_leg_radii)}")
 
 
 # blender-mcp's exec(source, {"__file__": path}) leaves __name__ as "builtins".

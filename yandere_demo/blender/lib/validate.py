@@ -158,11 +158,14 @@ HEIGHT_TOLERANCE = 0.005
 def validate_target_extras(prefix: str, height: float, triangle_budget: int, required_bones: list[str],
                            braid_bones: tuple, braid_meshes: tuple, skirt_clear_actions: list[str] | None = None,
                            braid_clear_actions: list[str] | None = None,
-                           floor_actions: list[str] | None = None) -> list[str]:
+                           floor_actions: list[str] | None = None,
+                           seated_actions: list[str] | None = None,
+                           sit_transition_actions: list[str] | None = None) -> list[str]:
     """Checks for the Astolfo target (Task 23a): the crown height, the triangle budget, the model's own bones, skinned
     fingers, no leg poking through the skirt in `skirt_clear_actions`, no braid or bow (`braid_bones` on
-    `braid_meshes`) sinking into the skirt in `braid_clear_actions`, and no shoe sinking into the floor in
-    `floor_actions`."""
+    `braid_meshes`) sinking into the skirt in `braid_clear_actions`, no shoe sinking into the floor in
+    `floor_actions`, in `seated_actions` the knees together with the front of the skirt draped over the lap, and in
+    those and `sit_transition_actions` nothing under the skirt in sight of a low front camera."""
     errors: list[str] = []
     armature = bpy.data.objects.get(f"{prefix}Char")
     if armature is None:
@@ -203,6 +206,13 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
             frame, depth = max(sunk, key=lambda item: item[1])
             errors.append(f"{action_name}: a shoe sinks into the floor in {len(sunk)} frames "
                           f"(worst frame {frame}: {depth * 1000:.1f} mm)")
+    for action_name in seated_actions or []:
+        if bpy.data.actions.get(action_name) is not None:
+            errors += _validate_seated_coverage(armature, action_name)
+            errors += _validate_seated_sightlines(prefix, armature, action_name)
+    for action_name in sit_transition_actions or []:
+        if bpy.data.actions.get(action_name) is not None:
+            errors += _validate_seated_sightlines(prefix, armature, action_name)
     body = bpy.data.objects.get(f"{prefix}Body")
     if body is not None:
         group_names = {group.name for group in body.vertex_groups}
@@ -210,6 +220,46 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
             if finger_tip not in group_names:
                 errors.append(f"{body.name} has no weights for {finger_tip}")
     errors += _validate_relaxed_fingers(armature)
+    return errors
+
+
+# Seated with a short skirt (addendum §3.6): the knees stay no wider apart than the hip joints, and the front panels
+# (the chains within 45 degrees of straight ahead) lie over the lap instead of folding up toward the chest. The
+# model's thigh tops stand a little above its low waistband, so the lap rises gently from the waist.
+FRONT_SKIRT_CHAINS = ("skirt_07", "skirt_00", "skirt_01")
+FRONT_SKIRT_MAX_LIFT_DEGREES = 15.0
+
+
+def _validate_seated_coverage(armature, action_name: str) -> list[str]:
+    action = bpy.data.actions[action_name]
+    animation_data = armature.animation_data_create()
+    previous_action = animation_data.action
+    animation_data.action = action
+    if hasattr(animation_data, "action_slot") and action.slots:
+        animation_data.action_slot = action.slots[0]
+    pose_bones = armature.pose.bones
+    front_bones = [bone for bone in pose_bones if bone.name.startswith(FRONT_SKIRT_CHAINS)]
+    widest = (0.0, 0, 0.0)
+    steepest = (-90.0, 0, "")
+    for frame in range(int(action.frame_range[0]), int(action.frame_range[1]) + 1):
+        bpy.context.scene.frame_set(frame)
+        knees = (pose_bones["shin.L"].head - pose_bones["shin.R"].head).length
+        hips = (pose_bones["thigh.L"].head - pose_bones["thigh.R"].head).length
+        if knees - hips > widest[0]:
+            widest = (knees - hips, frame, knees)
+        for bone in front_bones:
+            direction = (bone.tail - bone.head).normalized()
+            lift = math.degrees(math.asin(max(-1.0, min(1.0, direction.z))))
+            if lift > steepest[0]:
+                steepest = (lift, frame, bone.name)
+    animation_data.action = previous_action
+    errors = []
+    if widest[0] > 0.0:
+        errors.append(f"{action_name}: the knees are {widest[2]:.3f} m apart in frame {widest[1]}, "
+                      f"{widest[0]:.3f} m wider than the hips")
+    if steepest[0] > FRONT_SKIRT_MAX_LIFT_DEGREES:
+        errors.append(f"{action_name}: {steepest[2]} lifts {steepest[0]:.1f} degrees above horizontal in frame "
+                      f"{steepest[1]} (limit {FRONT_SKIRT_MAX_LIFT_DEGREES:.0f})")
     return errors
 
 
@@ -230,6 +280,83 @@ def _validate_relaxed_fingers(armature) -> list[str]:
                 errors.append(f"{finger}{side} is bent {bend:.1f} degrees at rest, expected a relaxed hand "
                               f"(at least {RELAXED_FINGER_DEGREES:.0f})")
     return errors
+
+
+# What the skirt covers seated: pelvis skin (`hips`/`glute_helper` weights) below the hip joints and within this far
+# of the middle. It must stay hidden from low front cameras: a crouching player's eye height (0.9 m) and below it,
+# straight in front of the knees and off to either side, sampled every few frames.
+COVERED_SKIN_BONES = ("hips", "glute_helper")
+COVERED_HALF_WIDTH = 0.06
+COVERED_BELOW_HIPS = 0.0
+SIGHTLINE_CAMERA_HEIGHTS = (0.7, 0.9)
+SIGHTLINE_CAMERA_SIDES = (-0.3, 0.0, 0.3)
+SIGHTLINE_CAMERA_DISTANCE = 1.2
+SIGHTLINE_FRAME_STEP = 10
+SIGHTLINE_SURFACE_GAP = 0.004
+SIGHTLINE_OCCLUDER_PARTS = ("Skirt", "Socks", "Shoes", "Hair", "Top")
+SIGHTLINE_OCCLUDER_BONES = ("thigh", "shin", "knee_helper", "hand", "thumb", "index", "middle", "ring", "pinky",
+                            "forearm", "wrist_helper", "ulna_helper")
+
+
+def _validate_seated_sightlines(prefix: str, armature, action_name: str) -> list[str]:
+    """No covered skin is in sight of a low front camera in a seated action."""
+    body = bpy.data.objects[f"{prefix}Body"]
+    names = {group.index: group.name for group in body.vertex_groups}
+    dominant = {vertex.index: names[max(vertex.groups, key=lambda element: element.weight).group]
+                for vertex in body.data.vertices if vertex.groups}
+    occluder_faces = [polygon.index for polygon in body.data.polygons
+                      if all(dominant.get(index, "").startswith(SIGHTLINE_OCCLUDER_BONES) for index in polygon.vertices)]
+    action = bpy.data.actions[action_name]
+    animation_data = armature.animation_data_create()
+    previous_action = animation_data.action
+    animation_data.action = action
+    if hasattr(animation_data, "action_slot") and action.slots:
+        animation_data.action_slot = action.slots[0]
+    start, end = int(action.frame_range[0]), int(action.frame_range[1])
+    worst = (0, 0)
+    for frame in sorted(set(range(start, end + 1, SIGHTLINE_FRAME_STEP)) | {end}):
+        bpy.context.scene.frame_set(frame)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        vertices, polygons = [], []
+        evaluated_body = body.evaluated_get(depsgraph)
+        body_mesh = evaluated_body.to_mesh()
+        body_points = [body.matrix_world @ vertex.co for vertex in body_mesh.vertices]
+        evaluated_body.to_mesh_clear()
+        offset = 0
+        vertices += body_points
+        polygons += [tuple(index + offset for index in body.data.polygons[face].vertices) for face in occluder_faces]
+        for part in SIGHTLINE_OCCLUDER_PARTS:
+            occluder = bpy.data.objects[f"{prefix}{part}"]
+            evaluated = occluder.evaluated_get(depsgraph)
+            mesh = evaluated.to_mesh()
+            offset = len(vertices)
+            vertices += [occluder.matrix_world @ vertex.co for vertex in mesh.vertices]
+            polygons += [tuple(index + offset for index in polygon.vertices) for polygon in mesh.polygons]
+            evaluated.to_mesh_clear()
+        tree = BVHTree.FromPolygons(vertices, polygons)
+        pose_bones = armature.pose.bones
+        hip_height = (armature.matrix_world @ pose_bones["thigh.L"].head).z
+        center = armature.matrix_world @ pose_bones["hips"].head
+        covered = [point for index, point in enumerate(body_points)
+                   if dominant.get(index, "").startswith(COVERED_SKIN_BONES)
+                   and abs(point.x - center.x) < COVERED_HALF_WIDTH and point.z < hip_height - COVERED_BELOW_HIPS]
+        knees = armature.matrix_world @ ((pose_bones["shin.L"].head + pose_bones["shin.R"].head) * 0.5)
+        visible = 0
+        for side in SIGHTLINE_CAMERA_SIDES:
+            for height in SIGHTLINE_CAMERA_HEIGHTS:
+                camera = Vector((knees.x + side, knees.y - SIGHTLINE_CAMERA_DISTANCE, height))
+                for point in covered:
+                    ray = point - camera
+                    hit, _, _, _ = tree.ray_cast(camera, ray.normalized(), ray.length - SIGHTLINE_SURFACE_GAP)
+                    if hit is None:
+                        visible += 1
+        if visible > worst[0]:
+            worst = (visible, frame)
+    animation_data.action = previous_action
+    if worst[0]:
+        return [f"{action_name}: {worst[0]} sightlines from low front cameras reach the skin under the skirt "
+                f"(worst frame {worst[1]})"]
+    return []
 
 
 FLOOR_TOLERANCE = 0.005

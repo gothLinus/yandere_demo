@@ -40,6 +40,10 @@ SKIRT_CLEAR_ACTIONS = ["target_walk_routine", "target_idle", "target_idle_shy", 
 BRAID_CLEAR_ACTIONS = ["target_idle", "target_walk_routine", "target_notice_player", "target_startled",
                        "target_look_around", "target_drink", "target_fix_braid", "target_lean_chat", "target_sweep",
                        "target_wave", "target_idle_shy", "target_idle_playful", "target_idle_confident"]
+# Clips seated for their whole length: knees together, skirt over the lap, nothing under it in sight. The sit
+# transitions only have to keep it out of sight.
+SEATED_ACTIONS = ["target_sit", "target_sit_read", "target_phone"]
+SIT_TRANSITION_ACTIONS = ["target_sit_down", "target_stand_up"]
 # Action name -> (frame count at 30 fps, loops).
 TARGET_ACTIONS = {
     "target_idle": (90, True),
@@ -109,6 +113,8 @@ CHECKS = {
             "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
             "braid_clear_actions": BRAID_CLEAR_ACTIONS,
             "floor_actions": list(TARGET_ACTIONS),
+            "seated_actions": SEATED_ACTIONS,
+            "sit_transition_actions": SIT_TRANSITION_ACTIONS,
         },
     },
     "player": {
@@ -202,7 +208,8 @@ def run_check(check_name: str) -> list[str]:
         errors += validate_target_extras(check["prefix"], extras["height"], extras["triangle_budget"], check["bones"],
                                          braid.resting_bones + braid.bow_bones, braid.meshes,
                                          extras["skirt_clear_actions"], extras["braid_clear_actions"],
-                                         extras["floor_actions"])
+                                         extras["floor_actions"], extras["seated_actions"],
+                                         extras["sit_transition_actions"])
     if "cast_extras" in check:
         errors += validate_cast_extras(check["prefix"], check["shape_keys"], **check["cast_extras"])
     return errors

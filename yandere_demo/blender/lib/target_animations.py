@@ -21,6 +21,8 @@ from .character_animation import (
 
 WALK = GaitParams(speed=1.3, frame_count=32)
 
+SEATED_KNEE_SPLAY = -0.05
+SEATED_FRONT_DROP = 1.0
 # Foot placements as (x, y, yaw, heel pitch) offsets from the rest ankles, so they fit any build of legs.
 IDLE_FEET = {".L": (0.001, -0.008, 7.0, 0.0), ".R": (-0.009, -0.048, -12.0, 0.0)}
 # The cradling hand is this far down the braid (fraction of its length); the stroking hand runs between the next two.
@@ -40,7 +42,7 @@ def rig_feet(rig: CharacterRig, offsets: dict) -> dict:
 
 
 def target_stance(rest_ankles: dict, mouth: Vector, hanging_bones: tuple, seat_clearance: float, heel_back: float,
-                  lap_offset: Vector, leg_radii: tuple) -> Stance:
+                  lap_offset: Vector, leg_radii: tuple, seated_leg_radii: tuple) -> Stance:
     """The target's idle and seated acting; every landmark argument is measured on the model."""
     return Stance(
         idle_feet=rest_relative_feet(rest_ankles, IDLE_FEET),
@@ -56,6 +58,11 @@ def target_stance(rest_ankles: dict, mouth: Vector, hanging_bones: tuple, seat_c
         heel_back=heel_back,
         lap_offset=lap_offset,
         leg_radii=leg_radii,
+        seated_leg_radii=seated_leg_radii,
+        skirt_sample_allowances=True,
+        # Seated with the short skirt, the knees come together (addendum §3.6).
+        seated_knee_splay=SEATED_KNEE_SPLAY,
+        seated_front_drop=SEATED_FRONT_DROP,
         mouth=mouth,
         hanging_bones=hanging_bones,
     )

@@ -24,6 +24,8 @@ UP = Vector((0.0, 0.0, 1.0))
 FORWARD = Vector((0.0, -1.0, 0.0))
 # Joint bend directions at rest: knees point forward, elbows point back.
 LEG_REST_POLE = Vector((0.0, -1.0, 0.0))
+# The knee pole's outward share: the knees point a little outward over the toes.
+KNEE_SPLAY = 0.12
 ARM_REST_POLE = Vector((0.0, 1.0, 0.0))
 # A straight two-bone chain flips its bend unpredictably, so reach stops short of full extension.
 MAX_REACH = 0.996
@@ -361,11 +363,13 @@ class FootGeometry:
 
 
 def place_leg(skeleton: Skeleton, pose: Pose, side: str, geometry: FootGeometry, placement: FootPlacement,
-              toe_bend_degrees: float = 0.0) -> float:
-    """Solve thigh and shin so the foot sits at `placement`; the toe stays flat on the ground when asked."""
+              toe_bend_degrees: float = 0.0, knee_splay: float = KNEE_SPLAY) -> float:
+    """Solve thigh and shin so the foot sits at `placement`; the toe stays flat on the ground when asked.
+
+    `knee_splay` is the knee pole's outward share (negative turns the knees inward)."""
     ankle, foot_world = geometry.placement_transform(placement)
     yaw = Quaternion(UP, math.radians(placement.yaw_degrees))
-    pole = yaw @ Vector((side_sign(side) * 0.12, -1.0, 0.0))
+    pole = yaw @ Vector((side_sign(side) * knee_splay, -1.0, 0.0))
     reach = solve_two_bone(skeleton, pose, f"thigh{side}", f"shin{side}", ankle, pole, LEG_REST_POLE)
     set_world_rotation(skeleton, pose, f"foot{side}", foot_world)
     if placement.toe_flat and placement.pitch_degrees > 0.0:
@@ -474,7 +478,8 @@ SEATED_BACK_TUCK = 70.0
 
 
 def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seated: float | None = None,
-                 leg_radii: tuple | None = None) -> None:
+                 leg_radii: tuple | None = None, sample_allowances: bool = False,
+                 front_drop: float = 0.0) -> None:
     """Swing every skirt chain with the thighs so the hem rides over the legs instead of through them.
 
     Chains are found by the `skirt_` prefix, so any number of chains with any number of segments works.
@@ -483,7 +488,9 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
     swing, side panels their own thigh's lift and spread. `sway_degrees` swings every hem toward +X.
     The root segment takes the main swing; the remaining segments share the follow-through (hem droop,
     seated drape). `seated` (0..1) drapes the skirt over the lap; by default it is derived from the
-    thigh lift. `leg_radii` (thigh top, thigh at the knee, knee) sizes the legs the skirt keeps clear of.
+    thigh lift. `leg_radii` (thigh top, thigh at the knee, knee) sizes the legs the skirt keeps clear of;
+    `sample_allowances` is passed on to `clear_legs`. `front_drop` (0..1) lets the lower segments of the front
+    panel fall that far toward hanging straight down, into the gap between thighs held together.
     """
     chains = skeleton.chains(SKIRT_PREFIX)
     if not chains:
@@ -538,7 +545,24 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
             follow_scale = (1.0 - 0.35 * seated * share["back"]) ** (1.0 / max(1, segments))
             for bone in chain[1:]:
                 pose.scales[bone] = Vector((1.0, follow_scale, 1.0))
-    clear_legs(skeleton, pose, chains, leg_radii or DEFAULT_LEG_RADII)
+    clear_legs(skeleton, pose, chains, leg_radii or DEFAULT_LEG_RADII, sample_allowances, sample_allowances)
+    if front_drop > 0.0:
+        _drop_front(skeleton, pose, chains, front_drop)
+
+
+def _drop_front(skeleton: Skeleton, pose: Pose, chains: list, amount: float) -> None:
+    """Turn the lower segments of the front-facing chains `amount` (0..1) of the way to hanging straight down; a
+    chain at 45 degrees from the front or further keeps its shape."""
+    for chain in chains:
+        _, share = _skirt_facing(skeleton, chain)
+        weight = max(0.0, 2.0 * share["front"] - 1.0) * amount
+        if weight <= 0.0:
+            continue
+        for bone in chain[1:]:
+            world, heads = forward_kinematics(skeleton, pose)
+            along = tail_position(skeleton, world, heads, bone) - heads[bone]
+            turn = Quaternion().slerp(along.rotation_difference(-UP), weight)
+            set_world_rotation(skeleton, pose, bone, turn @ world[bone])
 
 
 # Leg capsules the skirt keeps clear of: radius at the hip, at the knee, and how far down the shin the knee cap
@@ -586,7 +610,8 @@ def _chain_points(skeleton: Skeleton, world: dict, heads: dict, chain: list) -> 
     return points
 
 
-def _sector_pairs(skeleton: Skeleton, world: dict, heads: dict, chains: list, index: int) -> list:
+def _sector_pairs(skeleton: Skeleton, world: dict, heads: dict, chains: list, index: int,
+                  shares: tuple = SKIRT_SECTOR_SHARES) -> list:
     """(own point, neighbour point, share of the neighbour) samples across a chain's sector.
 
     Vertices between two chains are skinned to both by azimuth, so a point halfway to a neighbour moves half as
@@ -596,7 +621,7 @@ def _sector_pairs(skeleton: Skeleton, world: dict, heads: dict, chains: list, in
     pairs = []
     for neighbour_index in ((index - 1) % len(chains), (index + 1) % len(chains)):
         neighbour = _chain_points(skeleton, world, heads, chains[neighbour_index])
-        for share in SKIRT_SECTOR_SHARES:
+        for share in shares:
             pairs += [(point, other, share) for point, other in zip(own, neighbour)]
     return pairs
 
@@ -613,17 +638,22 @@ def _sector_clearance(pairs: list, pivot: Vector, turn: Quaternion, capsules: li
     return worst
 
 
-def _rest_allowances(skeleton: Skeleton, chains: list, leg_radii: tuple) -> dict:
-    """Per chain, the clearance each sector sample must keep: the margin, or less where it hangs closer at rest."""
-    key = ("rest_allowances", tuple(chain[0] for chain in chains), leg_radii)
+def _rest_allowances(skeleton: Skeleton, chains: list, leg_radii: tuple, per_sample: bool) -> dict:
+    """Per chain, the clearance each sector sample must keep: the margin, or less where it hangs closer at rest.
+
+    `per_sample` measures that rest clearance sample by sample; otherwise every sample of a chain gets the chain's
+    smallest one.
+    """
+    key = ("rest_allowances", tuple(chain[0] for chain in chains), leg_radii, per_sample)
     if key not in skeleton._chains:
         world, heads = forward_kinematics(skeleton, Pose())
         capsules = _leg_capsules(skeleton, world, heads, leg_radii)
         allowances = {}
         for index, chain in enumerate(chains):
             pairs = _sector_pairs(skeleton, world, heads, chains, index)
-            allowances[chain[0]] = [min(SKIRT_LEG_MARGIN, _sector_clearance([pair], heads[chain[0]], Quaternion(), capsules))
-                                    for pair in pairs]
+            sample_allowances = [min(SKIRT_LEG_MARGIN, _sector_clearance([pair], heads[chain[0]], Quaternion(), capsules))
+                                 for pair in pairs]
+            allowances[chain[0]] = sample_allowances if per_sample else [min(sample_allowances)] * len(pairs)
         skeleton._chains[key] = allowances
     return skeleton._chains[key]
 
@@ -664,22 +694,47 @@ def _drape_segments(skeleton: Skeleton, pose: Pose, chains: list, index: int, ax
         remaining -= low
 
 
-def clear_legs(skeleton: Skeleton, pose: Pose, chains: list, leg_radii: tuple = DEFAULT_LEG_RADII) -> None:
+def _share_allowances(allowances: list, shares: tuple) -> list:
+    """The allowances of the samples whose neighbour share is in `shares` (the list follows `_sector_pairs`)."""
+    per_share = len(allowances) // (2 * len(SKIRT_SECTOR_SHARES))
+    return [allowance for index, allowance in enumerate(allowances)
+            if SKIRT_SECTOR_SHARES[index // per_share % len(SKIRT_SECTOR_SHARES)] in shares]
+
+
+def clear_legs(skeleton: Skeleton, pose: Pose, chains: list, leg_radii: tuple = DEFAULT_LEG_RADII,
+               sample_allowances: bool = False, own_chains_first: bool = False) -> None:
     """Swing each skirt chain outward just far enough that its whole sector stays outside the legs.
 
     This bakes into the keys what the spring-bone colliders do at runtime: a striding or raised thigh lifts the
-    panels in front of it instead of pushing through them. Chains that already clear are left untouched. Each
-    sample of a sector keeps SKIRT_LEG_MARGIN, or the smaller clearance it has hanging at rest.
+    panels in front of it instead of pushing through them. Chains that already clear are left untouched. A sector
+    keeps SKIRT_LEG_MARGIN, or the smaller clearance it has hanging at rest: per sample with `sample_allowances`,
+    else the chain's smallest. `own_chains_first` first lifts every chain clear on its own, so a chain's sector is
+    then measured against neighbours already off the legs (seated, the panels over each thigh would otherwise lever
+    the centre panel up toward the chest).
     """
-    rest_allowances = _rest_allowances(skeleton, chains, leg_radii)
+    rest_allowances = _rest_allowances(skeleton, chains, leg_radii, sample_allowances)
+    order = list(range(len(chains)))
+    if own_chains_first:
+        lifts = _lift_chains(skeleton, pose, chains, leg_radii, rest_allowances, (0.0,), order)
+        # Chains that hang free settle first, so the ones lying on a thigh see their neighbours already in place.
+        order.sort(key=lambda index: lifts[index])
+    _lift_chains(skeleton, pose, chains, leg_radii, rest_allowances, SKIRT_SECTOR_SHARES, order)
+
+
+def _lift_chains(skeleton: Skeleton, pose: Pose, chains: list, leg_radii: tuple, rest_allowances: dict,
+                 shares: tuple, order: list) -> dict:
+    """One clearing pass over the chains in `order`, measuring the sector samples at `shares`; the full pass also
+    drapes. Returns each chain's lift in degrees."""
     world, heads = forward_kinematics(skeleton, pose)
     capsules = _leg_capsules(skeleton, world, heads, leg_radii)
     up = world["hips"] @ UP
     center = heads["hips"]
-    for index, chain in enumerate(chains):
+    lifts = {index: 0.0 for index in order}
+    for index in order:
+        chain = chains[index]
         pivot = heads[chain[0]]
-        pairs = _sector_pairs(skeleton, world, heads, chains, index)
-        allowances = rest_allowances[chain[0]]
+        pairs = _sector_pairs(skeleton, world, heads, chains, index, shares)
+        allowances = _share_allowances(rest_allowances[chain[0]], shares)
         hem = tail_position(skeleton, world, heads, chain[-1]) - center
         outward = hem - up * hem.dot(up)
         if outward.length < 1e-6:
@@ -702,10 +757,13 @@ def clear_legs(skeleton: Skeleton, pose: Pose, chains: list, leg_radii: tuple = 
                 else:
                     low = middle
             low = high
+        lifts[index] = low
         set_world_rotation(skeleton, pose, chain[0], Quaternion(axis, math.radians(low)) @ world[chain[0]])
         world, heads = forward_kinematics(skeleton, pose)
-        _drape_segments(skeleton, pose, chains, index, axis, low, allowances, capsules)
-        world, heads = forward_kinematics(skeleton, pose)
+        if shares == SKIRT_SECTOR_SHARES:
+            _drape_segments(skeleton, pose, chains, index, axis, low, allowances, capsules)
+            world, heads = forward_kinematics(skeleton, pose)
+    return lifts
 
 
 def smooth_rotations(poses: list, bones: list, loop: bool, passes: int = SKIRT_SMOOTHING_PASSES) -> None:
@@ -1092,7 +1150,7 @@ class WalkCycle:
         for side in SIDES:
             ankle, foot_rotation, toe_bend = self.foot(side, frame)
             yaw = Quaternion(UP, math.radians(side_sign(side) * self.params.toe_out_degrees))
-            pole = yaw @ Vector((side_sign(side) * 0.12, -1.0, 0.0))
+            pole = yaw @ Vector((side_sign(side) * KNEE_SPLAY, -1.0, 0.0))
             reaches[side] = solve_two_bone(self.skeleton, pose, f"thigh{side}", f"shin{side}", ankle, pole, LEG_REST_POLE)
             set_world_rotation(self.skeleton, pose, f"foot{side}", foot_rotation)
             if toe_bend > 0.0 and self._in_stance(side, frame):

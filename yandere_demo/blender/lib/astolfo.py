@@ -648,7 +648,7 @@ def measure_stance(armature, meshes: dict, landmarks: FaceLandmarks) -> Stance:
     hanging = tuple(name for name in braid_layout(armature).bones if bones[name].head_local.z < chest_z)
     return target_animations.target_stance(
         rest_ankles, landmarks.mouth, hanging, _seat_clearance(armature, meshes), _heel_back(meshes["Shoes"], rest_ankles),
-        _lap_offset(armature, meshes), _leg_radii(armature, meshes))
+        _lap_offset(armature, meshes), _leg_radii(armature, meshes, True), _leg_radii(armature, meshes, False))
 
 
 SEATED_SKIN_BONES = ("hips", "thigh", "glute_helper")
@@ -720,12 +720,13 @@ THIGH_BOTTOM_RING = (0.85, 0.95)
 KNEE_REACH = 0.04
 
 
-def _leg_radii(armature, meshes: dict) -> tuple:
+def _leg_radii(armature, meshes: dict, all_round: bool) -> tuple:
     """(thigh radius at its top, thigh radius at the knee, knee radius) of the left leg's skin.
 
-    The thigh rings are measured all round, since a stride pushes the front and the side of the thigh into the skirt
-    (where a ring already reaches the hanging skirt at rest, clear_legs keeps only that rest clearance). The knee is
-    measured forward: only the bent knee's front juts out.
+    Standing (`all_round`), the thigh rings are measured all round, since a stride pushes the front and the side of
+    the thigh into the skirt (where a ring already reaches the hanging skirt at rest, clear_legs keeps only that rest
+    clearance). Seated, the thigh's front becomes its top, under the lap of the skirt, so it is measured forward. The
+    knee is always measured forward: only the bent knee's front juts out.
     """
     bones = armature.data.bones
     hip = bones["thigh.L"].head_local
@@ -741,7 +742,8 @@ def _leg_radii(armature, meshes: dict) -> tuple:
                 continue
             point = mesh_object.matrix_world @ vertex.co
             fraction = (point - hip).dot(axis) / axis.length_squared
-            reach = (point - (hip + axis * fraction)).length
+            offset = point - (hip + axis * fraction)
+            reach = offset.length if all_round else offset.dot(forward)
             if (point - knee).length < KNEE_REACH:
                 knee_radius = max(knee_radius, (point - knee).dot(forward))
             if names[strongest.group] != "thigh.L":

@@ -14,7 +14,7 @@ from typing import Callable
 from mathutils import Quaternion, Vector
 
 from .animation import (
-    DEFAULT_LEG_RADII, FORWARD, SIDES, UP, Curve, FootGeometry, Pose, Skeleton, WalkCycle, aligning_rotation, bend,
+    DEFAULT_LEG_RADII, FORWARD, KNEE_SPLAY, SIDES, UP, Curve, FootGeometry, Pose, Skeleton, WalkCycle, aligning_rotation, bend,
     curl_fingers, degrees, follow_skirt, forward_kinematics, hang, idle_breathing, lerp, mirrored_degrees, palm_normal,
     place_leg, reach_arm, set_world_rotation, share_twist, side_sign, sit_pose, smoothstep, world_point,
 )
@@ -78,6 +78,17 @@ class Stance:
     lap_offset: Vector = field(default_factory=lambda: Vector((0.012, 0.0, 0.088)))
     # Leg thickness the skirt keeps clear of: thigh radius at its top and at the knee, and the bent knee's radius.
     leg_radii: tuple = DEFAULT_LEG_RADII
+    # Seated, the thighs lie flat, so the skirt clears their top: these radii replace `leg_radii` as the hips sit.
+    seated_leg_radii: tuple | None = None
+    # The skirt keeps each sample's own rest clearance from the legs instead of its chain's smallest, and settles the
+    # free-hanging chains before the ones lying on a thigh.
+    skirt_sample_allowances: bool = False
+    # Sitting down, the lower segments of the front skirt panel fall this share (0..1) of the way to hanging straight
+    # down, into the gap between the thighs held together.
+    seated_front_drop: float = 0.0
+    # Seated, the knee pole's outward share in the body's frame (negative brings the knees together); None keeps
+    # KNEE_SPLAY in each foot's frame.
+    seated_knee_splay: float | None = None
 
 
 @dataclass
@@ -99,6 +110,10 @@ class BodySpec:
     gait_frame: float = 0.0
     # Overrides the seated drape of the skirt (0..1); by default it follows the hips height.
     seated: float | None = None
+
+
+# Sitting down, the knees are together and the front of the skirt has fallen between them by this share of the way.
+LOWERED_SHARE = 0.6
 
 
 class CharacterRig:
@@ -177,6 +192,12 @@ class CharacterRig:
         self.seated_hands(spec)
         return spec
 
+    def lowered_factor(self, hips_height: float) -> float:
+        """0 at the standing hips height, 1 from LOWERED_SHARE of the way down to the seat, linear in between."""
+        idle_height = self.stance.idle_hips_offset.z
+        seated_height = self.seated_offset.z
+        return max(0.0, min(1.0, (idle_height - hips_height) / ((idle_height - seated_height) * LOWERED_SHARE)))
+
     def seated_factor(self, hips_height: float) -> float:
         """0 standing, 1 once the hips are actually down on the seat (not while crouching above it)."""
         idle_height = self.stance.idle_hips_offset.z
@@ -246,13 +267,20 @@ def compose(rig: CharacterRig, spec: BodySpec) -> Pose:
     skeleton = rig.skeleton
     pose = Pose()
     pose.rotations["hips"] = degrees(*spec.hips)
+    if spec.seated is not None:
+        seated = spec.seated
+    else:
+        seated = 0.0 if spec.gait is not None else rig.seated_factor(spec.hips_offset.z)
+    # The knees and the front of the skirt follow from the moment the hips start down, not only once they are seated.
+    lowered = 0.0 if spec.gait is not None or spec.seated == 0.0 else rig.lowered_factor(spec.hips_offset.z)
     if spec.gait is not None:
         spec.gait.apply_lower_body(pose, spec.gait_frame)
     else:
         pose.offsets["hips"] = spec.hips_offset.copy()
         feet = spec.feet or rig.stance.idle_feet
         for side in SIDES:
-            place_leg(skeleton, pose, side, rig.feet[side], feet[side])
+            place_leg(skeleton, pose, side, rig.feet[side], feet[side],
+                      knee_splay=_knee_splay(rig.stance, feet[side], side, lowered))
     pose.rotations["spine"] = degrees(*spec.spine)
     pose.rotations["chest"] = degrees(*spec.chest)
     pose.rotations["neck"] = degrees(*spec.neck)
@@ -266,12 +294,22 @@ def compose(rig: CharacterRig, spec: BodySpec) -> Pose:
         arm = spec.arms[side]
         pose.turn(f"shoulder{side}", mirrored_degrees(side, *arm.shoulder))
         _pose_arm(rig, pose, side, arm)
-    if spec.seated is not None:
-        seated = spec.seated
-    else:
-        seated = 0.0 if spec.gait is not None else rig.seated_factor(spec.hips_offset.z)
-    follow_skirt(skeleton, pose, spec.skirt_sway, seated, rig.stance.leg_radii)
+    leg_radii = rig.stance.leg_radii
+    if rig.stance.seated_leg_radii is not None:
+        leg_radii = tuple(lerp(standing, sitting, seated) for standing, sitting in zip(leg_radii, rig.stance.seated_leg_radii))
+    follow_skirt(skeleton, pose, spec.skirt_sway, seated, leg_radii, rig.stance.skirt_sample_allowances,
+                 rig.stance.seated_front_drop * lowered)
     return pose
+
+
+def _knee_splay(stance: Stance, placement, side: str, lowered: float) -> float:
+    """The knee pole's outward share in the foot's frame, blending to `seated_knee_splay` (body frame) as the hips go
+    down to the seat (`lowered`, 0..1)."""
+    if stance.seated_knee_splay is None:
+        return KNEE_SPLAY
+    yaw = math.radians(placement.yaw_degrees)
+    seated_splay = (stance.seated_knee_splay - side_sign(side) * math.sin(yaw)) / math.cos(yaw)
+    return lerp(KNEE_SPLAY, seated_splay, lowered)
 
 
 def _pose_arm(rig: CharacterRig, pose: Pose, side: str, arm: ArmSpec) -> None:
