@@ -155,10 +155,12 @@ HEIGHT_TOLERANCE = 0.005
 
 def validate_target_extras(prefix: str, height: float, triangle_budget: int, required_bones: list[str],
                            braid_bones: tuple, braid_meshes: tuple, skirt_clear_actions: list[str] | None = None,
-                           braid_clear_actions: list[str] | None = None) -> list[str]:
+                           braid_clear_actions: list[str] | None = None,
+                           floor_actions: list[str] | None = None) -> list[str]:
     """Checks for the Astolfo target (Task 23a): the crown height, the triangle budget, the model's own bones, skinned
-    fingers, no leg poking through the skirt in `skirt_clear_actions`, and no braid or bow (`braid_bones` on
-    `braid_meshes`) sinking into the skirt in `braid_clear_actions`."""
+    fingers, no leg poking through the skirt in `skirt_clear_actions`, no braid or bow (`braid_bones` on
+    `braid_meshes`) sinking into the skirt in `braid_clear_actions`, and no shoe sinking into the floor in
+    `floor_actions`."""
     errors: list[str] = []
     armature = bpy.data.objects.get(f"{prefix}Char")
     if armature is None:
@@ -191,6 +193,14 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
             frame, count, depth = max(pokes, key=lambda item: item[2])
             errors.append(f"{action_name}: legs poke through the skirt in {len(pokes)} frames "
                           f"(worst frame {frame}: {count} vertices, {depth * 1000:.1f} mm)")
+    for action_name in floor_actions or []:
+        if bpy.data.actions.get(action_name) is None:
+            continue
+        sunk = [(frame, depth) for frame, depth in sole_floor_depths(prefix, action_name) if depth > FLOOR_TOLERANCE]
+        if sunk:
+            frame, depth = max(sunk, key=lambda item: item[1])
+            errors.append(f"{action_name}: a shoe sinks into the floor in {len(sunk)} frames "
+                          f"(worst frame {frame}: {depth * 1000:.1f} mm)")
     body = bpy.data.objects.get(f"{prefix}Body")
     if body is not None:
         group_names = {group.name for group in body.vertex_groups}
@@ -198,6 +208,32 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
             if finger_tip not in group_names:
                 errors.append(f"{body.name} has no weights for {finger_tip}")
     return errors
+
+
+FLOOR_TOLERANCE = 0.005
+
+
+def sole_floor_depths(prefix: str, action_name: str) -> list[tuple[int, float]]:
+    """(frame, how far the lowest shoe vertex lies below the floor at z = 0) for every frame of an action."""
+    armature = bpy.data.objects[f"{prefix}Char"]
+    shoes = bpy.data.objects[f"{prefix}Shoes"]
+    action = bpy.data.actions[action_name]
+    animation_data = armature.animation_data_create()
+    previous_action = animation_data.action
+    animation_data.action = action
+    if hasattr(animation_data, "action_slot") and action.slots:
+        animation_data.action_slot = action.slots[0]
+    scene = bpy.context.scene
+    results = []
+    for frame in range(int(action.frame_range[0]), int(action.frame_range[1]) + 1):
+        scene.frame_set(frame)
+        evaluated = shoes.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        mesh = evaluated.to_mesh()
+        lowest = min((shoes.matrix_world @ vertex.co).z for vertex in mesh.vertices)
+        evaluated.to_mesh_clear()
+        results.append((frame, -lowest))
+    animation_data.action = previous_action
+    return results
 
 
 def validate_cast_extras(prefix: str, shape_keys: list[str], hair_variants: list[str], absent_bones: list[str],

@@ -108,6 +108,7 @@ CHECKS = {
             "triangle_budget": TARGET_TRIANGLE_BUDGET,
             "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
             "braid_clear_actions": BRAID_CLEAR_ACTIONS,
+            "floor_actions": list(TARGET_ACTIONS),
         },
     },
     "player": {
@@ -200,7 +201,8 @@ def run_check(check_name: str) -> list[str]:
         braid = astolfo.braid_layout(bpy.data.objects[f"{check['prefix']}Char"])
         errors += validate_target_extras(check["prefix"], extras["height"], extras["triangle_budget"], check["bones"],
                                          braid.resting_bones + braid.bow_bones, braid.meshes,
-                                         extras["skirt_clear_actions"], extras["braid_clear_actions"])
+                                         extras["skirt_clear_actions"], extras["braid_clear_actions"],
+                                         extras["floor_actions"])
     if "cast_extras" in check:
         errors += validate_cast_extras(check["prefix"], check["shape_keys"], **check["cast_extras"])
     return errors

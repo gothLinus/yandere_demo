@@ -182,6 +182,7 @@ def convert(source_armature, meshes: dict, texture_directory: str) -> tuple:
         mesh_object.name = mesh_object.data.name = f"{PREFIX}{part}"
         mesh_utils.parent_to_armature(mesh_object, armature)
     _lower_arms(armature, meshes)
+    weight_toes(armature, meshes)
     add_skirt_chains(armature, meshes["Skirt"])
     _assign_materials(meshes, texture_directory)
     landmarks = _face_landmarks(meshes["Face"])
@@ -369,6 +370,44 @@ def _lower_arms(armature, meshes: dict) -> None:
             moved = [(edit_bone, rotations[side] @ edit_bone.head, rotations[side] @ edit_bone.tail) for edit_bone in arm_bones]
             for edit_bone, head, tail in moved:
                 edit_bone.head, edit_bone.tail, edit_bone.roll = head, tail, 0.0
+
+
+# ---------------------------------------------------------------------------------------------------
+# Toes
+
+# The model's feet and shoes are weighted to the foot only, so a heel lift would swing the toe box into the floor.
+# The forefoot ahead of the ball joint moves to the toe bone, blended over this band centred on the ball.
+TOE_BLEND = 0.03
+FOOT_MESH_PARTS = ("Body", "Socks", "Shoes")
+
+
+def weight_toes(armature, meshes: dict) -> None:
+    """Hand the forefoot of the body, socks and shoes to the toe bones, and point each toe bone along its forefoot."""
+    tips = {}
+    for side in SIDES:
+        ball = armature.data.bones[f"toe{side}"].head_local.copy()
+        ankle = armature.data.bones[f"foot{side}"].head_local
+        forward = Vector((ball.x - ankle.x, ball.y - ankle.y, 0.0)).normalized()
+        reach = 0.0
+        for part in FOOT_MESH_PARTS:
+            mesh_object = meshes[part]
+            foot_group = mesh_object.vertex_groups.get(f"foot{side}")
+            if foot_group is None:
+                continue
+            toe_group = mesh_object.vertex_groups.get(f"toe{side}") or mesh_object.vertex_groups.new(name=f"toe{side}")
+            for vertex in mesh_object.data.vertices:
+                foot_weight = next((element.weight for element in vertex.groups if element.group == foot_group.index), 0.0)
+                along = (mesh_object.matrix_world @ vertex.co - ball).dot(forward)
+                share = max(0.0, min(1.0, along / TOE_BLEND + 0.5))
+                if foot_weight <= 0.0 or share <= 0.0:
+                    continue
+                reach = max(reach, along)
+                foot_group.add([vertex.index], foot_weight * (1.0 - share), "REPLACE")
+                toe_group.add([vertex.index], foot_weight * share, "REPLACE")
+        tips[side] = ball + forward * reach
+    with _EditMode(armature):
+        for side in SIDES:
+            armature.data.edit_bones[f"toe{side}"].tail = tips[side]
 
 
 # ---------------------------------------------------------------------------------------------------
