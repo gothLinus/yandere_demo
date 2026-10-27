@@ -1,5 +1,7 @@
 """Structural checks for generated character assets, run inside Blender."""
 
+import math
+
 import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
@@ -207,6 +209,26 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
         for finger_tip in ("thumb_03.L", "index_03.L", "pinky_03.R"):
             if finger_tip not in group_names:
                 errors.append(f"{body.name} has no weights for {finger_tip}")
+    errors += _validate_relaxed_fingers(armature)
+    return errors
+
+
+# The clips' finger curls are rest-relative and were written for a relaxed hand (rig.REST_FINGER_CURL_DEGREES at
+# each of a finger's two inner joints).
+RELAXED_FINGER_DEGREES = 12.0
+RELAXED_FINGERS = ("index", "middle", "ring", "pinky")
+
+
+def _validate_relaxed_fingers(armature) -> list[str]:
+    errors = []
+    bones = armature.data.bones
+    for side in (".L", ".R"):
+        for finger in RELAXED_FINGERS:
+            first, last = bones[f"{finger}_01{side}"], bones[f"{finger}_03{side}"]
+            bend = math.degrees((first.tail_local - first.head_local).angle(last.tail_local - last.head_local))
+            if bend < RELAXED_FINGER_DEGREES:
+                errors.append(f"{finger}{side} is bent {bend:.1f} degrees at rest, expected a relaxed hand "
+                              f"(at least {RELAXED_FINGER_DEGREES:.0f})")
     return errors
 
 

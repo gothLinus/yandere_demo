@@ -20,7 +20,10 @@ from . import body, clothing, mesh_utils, pleats, target_animations
 from .animation import SIDES, side_sign
 from .character_animation import Stance
 from .materials import principled
-from .rig import DEFAULT_PROPORTIONS, FINGER_SEGMENTS, FINGERS, SKIRT_CHAINS, SKIRT_SEGMENTS, chain_names, skirt_chain_azimuth
+from .rig import (
+    DEFAULT_PROPORTIONS, FINGER_SEGMENTS, FINGERS, REST_FINGER_CURL_DEGREES, SKIRT_CHAINS, SKIRT_SEGMENTS, chain_names,
+    skirt_chain_azimuth,
+)
 
 PREFIX = "Target"
 ARMATURE_NAME = f"{PREFIX}Char"
@@ -182,6 +185,7 @@ def convert(source_armature, meshes: dict, texture_directory: str) -> tuple:
         mesh_object.name = mesh_object.data.name = f"{PREFIX}{part}"
         mesh_utils.parent_to_armature(mesh_object, armature)
     _lower_arms(armature, meshes)
+    _relax_fingers(armature, meshes)
     weight_toes(armature, meshes)
     add_skirt_chains(armature, meshes["Skirt"])
     _assign_materials(meshes, texture_directory)
@@ -346,13 +350,26 @@ def _lower_arms(armature, meshes: dict) -> None:
         pose_bone = armature.pose.bones[f"upper_arm{side}"]
         pose_bone.matrix = rotations[side] @ pose_bone.bone.matrix_local
     bpy.context.view_layer.update()
-    arm_groups = {f"{name}{side}" for side in SIDES for name in ("upper_arm", "forearm", "hand")}
+    _bake_posed_meshes(armature, meshes, {f"{name}{side}" for side in SIDES for name in ("upper_arm", "forearm", "hand")})
+    with _EditMode(armature):
+        for side in SIDES:
+            upper_arm = armature.data.edit_bones[f"upper_arm{side}"]
+            arm_bones = [upper_arm] + list(upper_arm.children_recursive)
+            # Connected heads follow their parents' tails, so every new joint is taken from the old pose first.
+            moved = [(edit_bone, rotations[side] @ edit_bone.head, rotations[side] @ edit_bone.tail) for edit_bone in arm_bones]
+            for edit_bone, head, tail in moved:
+                edit_bone.head, edit_bone.tail, edit_bone.roll = head, tail, 0.0
+
+
+def _bake_posed_meshes(armature, meshes: dict, moved_groups: set) -> None:
+    """Write the current pose into every mesh weighted to `moved_groups` as its rest shape, then clear the pose."""
     depsgraph = bpy.context.evaluated_depsgraph_get()
     for mesh_object in meshes.values():
-        if not arm_groups & {group.name for group in mesh_object.vertex_groups}:
+        if not moved_groups & {group.name for group in mesh_object.vertex_groups}:
             continue
         if mesh_object.data.shape_keys is not None:
-            raise ValueError(f"{mesh_object.name} has shape keys and arm weights; its rest arms cannot be lowered")
+            raise ValueError(f"{mesh_object.name} has shape keys and weights on {sorted(moved_groups)}; "
+                             f"its rest pose cannot be changed")
         evaluated = mesh_object.evaluated_get(depsgraph)
         posed = evaluated.to_mesh()
         coordinates = numpy.empty(len(posed.vertices) * 3)
@@ -362,14 +379,37 @@ def _lower_arms(armature, meshes: dict) -> None:
         mesh_object.data.update()
     for pose_bone in armature.pose.bones:
         pose_bone.matrix_basis = Matrix.Identity(4)
+
+
+# The model's fingers are straight at rest; the clips' curls are rest-relative and were written for the procedural
+# rig's relaxed hand, so each finger joint is bent this far toward the palm at rest.
+RELAXED_FINGERS = ("index", "middle", "ring", "pinky")
+
+
+def _relax_fingers(armature, meshes: dict) -> None:
+    """Bend every joint of the four fingers by REST_FINGER_CURL_DEGREES toward the palm and make that the rest pose."""
+    angle = math.radians(REST_FINGER_CURL_DEGREES)
+    finger_bones = []
+    for side in SIDES:
+        hand = armature.data.bones[f"hand{side}"]
+        direction = (hand.tail_local - hand.head_local).normalized()
+        inward = Vector((-side_sign(side), 0.0, 0.0))
+        palm = (inward - direction * inward.dot(direction)).normalized()
+        for finger in RELAXED_FINGERS:
+            for segment in range(1, FINGER_SEGMENTS + 1):
+                bpy.context.view_layer.update()
+                pose_bone = armature.pose.bones[f"{finger}_{segment:02d}{side}"]
+                head = pose_bone.head.copy()
+                axis = (pose_bone.tail - head).normalized().cross(palm).normalized()
+                turn = Matrix.Translation(head) @ Matrix.Rotation(angle, 4, axis) @ Matrix.Translation(-head)
+                pose_bone.matrix = turn @ pose_bone.matrix
+                finger_bones.append(pose_bone.name)
+    bpy.context.view_layer.update()
+    posed = {name: (armature.pose.bones[name].head.copy(), armature.pose.bones[name].tail.copy()) for name in finger_bones}
+    _bake_posed_meshes(armature, meshes, set(finger_bones))
     with _EditMode(armature):
-        for side in SIDES:
-            upper_arm = armature.data.edit_bones[f"upper_arm{side}"]
-            arm_bones = [upper_arm] + list(upper_arm.children_recursive)
-            # Connected heads follow their parents' tails, so every new joint is taken from the old pose first.
-            moved = [(edit_bone, rotations[side] @ edit_bone.head, rotations[side] @ edit_bone.tail) for edit_bone in arm_bones]
-            for edit_bone, head, tail in moved:
-                edit_bone.head, edit_bone.tail, edit_bone.roll = head, tail, 0.0
+        for name in finger_bones:
+            armature.data.edit_bones[name].head, armature.data.edit_bones[name].tail = posed[name]
 
 
 # ---------------------------------------------------------------------------------------------------
