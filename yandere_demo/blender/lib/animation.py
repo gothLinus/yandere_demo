@@ -414,12 +414,14 @@ def aim_hand(skeleton: Skeleton, pose: Pose, side: str, finger_direction, palm_d
 FINGER_CHAIN_PREFIXES = ("thumb_", "index_", "middle_", "ring_", "pinky_")
 
 
-def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: float, thumb_degrees: float) -> None:
+def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: float, thumb_degrees: float,
+                 finger_curls: dict | None = None, splay_degrees: float = 0.0) -> None:
     """Curl the finger chains under the hand toward the palm, sharing the angle evenly over their segments.
 
     Only chains named like fingers (`FINGER_CHAIN_PREFIXES`) curl, so props or attachment bones parented to
     the hand are left alone. The thumb takes `thumb_degrees` and curls across the palm; the others take
-    `fingers_degrees`.
+    `fingers_degrees`, or their own entry of `finger_curls` (finger prefix such as "index" -> degrees).
+    `splay_degrees` fans the fingers apart (negative closes them), the index and pinky the most.
     """
     hand = f"hand{side}"
     palm = palm_normal(skeleton, side)
@@ -428,10 +430,30 @@ def curl_fingers(skeleton: Skeleton, pose: Pose, side: str, fingers_degrees: flo
         if not chain[0].startswith(FINGER_CHAIN_PREFIXES):
             continue
         is_thumb = chain[0].startswith("thumb_")
-        angle = (thumb_degrees if is_thumb else fingers_degrees) / len(chain)
+        curl = thumb_degrees if is_thumb else fingers_degrees
+        if finger_curls is not None and not is_thumb:
+            curl = finger_curls.get(chain[0].split("_")[0], curl)
+        angle = curl / len(chain)
         for bone in chain:
             pose.rotations[bone] = Quaternion()
             bend(skeleton, pose, bone, angle, across_palm if is_thumb else palm)
+        if splay_degrees and not is_thumb:
+            _splay_finger(skeleton, pose, side, chain[0], splay_degrees)
+
+
+# How far each finger fans out for a unit splay, away from the middle finger.
+FINGER_SPLAY_SHARES = {"index": 1.0, "middle": 0.0, "ring": 0.7, "pinky": 1.4}
+
+
+def _splay_finger(skeleton: Skeleton, pose: Pose, side: str, root: str, splay_degrees: float) -> None:
+    share = FINGER_SPLAY_SHARES.get(root.split("_")[0], 0.0)
+    if not share:
+        return
+    away = skeleton.heads[root] - skeleton.heads[f"middle_01{side}"]
+    away -= skeleton.direction(root) * away.dot(skeleton.direction(root))
+    if away.length < 1e-6:
+        return
+    bend(skeleton, pose, root, splay_degrees * share, away.normalized())
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1026,6 +1048,9 @@ class GaitParams:
     heel_strike_degrees: float = 16.0
     toe_off_degrees: float = 58.0
     swing_lift: float = 0.03
+    # The swing lift follows sin(pi * swing) to this power: below 2 the foot leaves and meets the floor more steeply
+    # instead of skimming it.
+    swing_lift_exponent: float = 2.0
     hips_height: float = -0.012
     hips_bob: float = 0.013
     hips_sway: float = 0.016
@@ -1092,7 +1117,7 @@ class WalkCycle:
         end_velocity = (self._stance_ankle(side, epsilon) - end) / epsilon
         span = 1.0 - params.duty
         ankle = hermite(start, start_velocity * span, end, end_velocity * span, swing)
-        ankle.z += params.swing_lift * math.sin(math.pi * swing) ** 2
+        ankle.z += params.swing_lift * math.sin(math.pi * swing) ** params.swing_lift_exponent
         pitch = self.pitch_curve.scalar(phase)
         yaw = Quaternion(UP, math.radians(side_sign(side) * params.toe_out_degrees))
         rotation = yaw @ Quaternion(Vector((1.0, 0.0, 0.0)), math.radians(pitch))

@@ -19,7 +19,10 @@ from .character_animation import (
     sit_transition_body, stand_up_curves,
 )
 
-WALK = GaitParams(speed=1.3, frame_count=32)
+# A light, narrow-tracking step with a fuller hip sway; the steeper swing lift lets the toe leave and the heel meet
+# the floor without skimming it.
+WALK = GaitParams(speed=1.3, frame_count=32, feet_x=0.052, swing_lift=0.036, swing_lift_exponent=0.85,
+                  hips_bob=0.015, hips_sway=0.019, pelvis_yaw_degrees=5.5, pelvis_roll_degrees=4.5)
 
 SEATED_KNEE_SPLAY = -0.05
 SEATED_FRONT_DROP = 1.0
@@ -91,10 +94,61 @@ class BraidLayout:
 
 
 # ---------------------------------------------------------------------------------------------------
+# Acting helpers
+
+FINGERS = ("index", "middle", "ring", "pinky")
+
+
+def wave(frame: float, period: float, offset: float = 0.0, cycles: float = 1.0) -> float:
+    return math.sin(2.0 * math.pi * (frame / period * cycles - offset))
+
+
+def finger_fan(base: float, gradient: float, ripple: float = 0.0, phase: float = 0.0, lag: float = 0.05) -> dict:
+    """Curls rising from the index to the pinky by `gradient` per finger; `ripple` rolls a wave across them, the index
+    first, so a resting hand never reads as a mitten."""
+    return {name: base + gradient * index + ripple * math.sin(2.0 * math.pi * (phase - lag * index))
+            for index, name in enumerate(FINGERS)}
+
+
+def graceful_hand(arm: ArmSpec, phase: float = 0.0, ripple: float = 2.0) -> None:
+    """The relaxed anime hand: the index nearly straight, each finger after it a little more curled, a slight fan."""
+    arm.finger_curls = finger_fan(9.0, 6.0, ripple, phase)
+    arm.thumb = 14.0
+    arm.splay = 4.0
+
+
+def acting_idle(rig: CharacterRig, frame: float, period: float) -> BodySpec:
+    """The idle stance with a fuller weight shift: the hips lead it, the chest follows and the head trails and
+    counter-tilts, so the body settles in a wave instead of swaying as one block."""
+    spec = rig.idle_body(frame, period)
+    shift = wave(frame, period)
+    spec.hips_offset += Vector((0.003 * shift, 0.0, -0.0015 * (0.5 - 0.5 * wave(frame, period, 0.25, 2.0))))
+    spec.chest = add_degrees(spec.chest, (0.0, 0.6 * wave(frame, period, 0.08), 0.0))
+    spec.head = add_degrees(spec.head, (0.0, -0.9 * wave(frame, period, 0.16), 0.0))
+    for side in SIDES:
+        graceful_hand(spec.arms[side], frame / period + (0.0 if side == ".L" else 0.4))
+    return spec
+
+
+# ---------------------------------------------------------------------------------------------------
 # Clips
 
+# Mid-idle the right fingers roll and the head tips with a small "hm?", led by the head and followed by the neck.
+IDLE_FIDGET = Curve([(0, 0.0), (38, 0.0), (48, 1.0), (58, 0.3), (66, 0.0), (90, 0.0)], period=90.0)
+IDLE_TILT = Curve([(0, 0.0), (50, 0.0), (58, 1.0), (72, 0.8), (84, 0.0), (90, 0.0)], period=90.0)
+
+
 def clip_idle(rig: CharacterRig, frame: float) -> BodySpec:
-    return rig.idle_body(frame, 90.0)
+    spec = acting_idle(rig, frame, 90.0)
+    fidget = IDLE_FIDGET.scalar(frame)
+    right = spec.arms[".R"]
+    right.finger_curls = {name: curl + 18.0 * IDLE_FIDGET.scalar(frame - 2.0 * index)
+                          for index, (name, curl) in enumerate(right.finger_curls.items())}
+    right.hand = add_degrees(right.hand, (6.0 * fidget, 0.0, 0.0))
+    spec.head = add_degrees(spec.head, (-1.5 * IDLE_TILT.scalar(frame), 4.0 * IDLE_TILT.scalar(frame),
+                                        3.0 * IDLE_TILT.scalar(frame)))
+    spec.neck = add_degrees(spec.neck, (0.0, 1.5 * IDLE_TILT.scalar(frame - 3.0), 1.5 * IDLE_TILT.scalar(frame - 3.0)))
+    return spec
 
 
 def clip_walk(rig: CharacterRig, frame: float, cycle: WalkCycle) -> BodySpec:
@@ -118,9 +172,9 @@ def clip_walk(rig: CharacterRig, frame: float, cycle: WalkCycle) -> BodySpec:
         arm.adduct = 21.0
         arm.swing = swing
         arm.elbow = 16.0 + 9.0 * max(0.0, swing) / 16.0 + 3.0 * math.cos(2.0 * math.pi * (side_phase - 0.14))
-        arm.hand = (4.0 * math.cos(2.0 * math.pi * (side_phase - 0.12)), -9.0, 0.0)
-        arm.fingers = 20.0
-        arm.thumb = 12.0
+        # The hand trails the forearm's swing and flips over at each end of it.
+        arm.hand = (8.0 * math.cos(2.0 * math.pi * (side_phase - 0.16)), -10.0, 3.0 * math.sin(2.0 * math.pi * (side_phase - 0.2)))
+        graceful_hand(arm, side_phase - 0.2, 3.0)
         arm.shoulder = (0.0, -2.0 + 1.5 * bob, 2.0 * math.cos(2.0 * math.pi * (side_phase - 0.05)))
     spec.skirt_sway = -2.5 * math.cos(2.0 * math.pi * (phase - 0.12))
     return spec
@@ -201,24 +255,37 @@ def clip_startled(rig: CharacterRig, frame: float, curves: dict) -> BodySpec:
     return spec
 
 
-LOOK_AROUND = Curve([(0, 0.0), (10, 0.0), (30, 34.0), (46, 38.0), (56, 30.0), (72, -30.0), (88, -38.0), (100, -33.0),
-                     (114, -4.0), (120, 0.0)], period=120.0)
+# Before each turn a small counter-move (anticipation), then the head leads, overshoots and settles.
+LOOK_AROUND = Curve([(0, 0.0), (8, -4.0), (14, -3.0), (30, 36.0), (36, 40.0), (46, 35.0), (56, 30.0), (62, 34.0),
+                     (78, -34.0), (84, -40.0), (96, -35.0), (102, -31.0), (116, -2.0), (120, 0.0)], period=120.0)
 LOOK_UP = Curve([(0, 0.0), (30, -4.0), (46, -1.0), (60, 0.0), (80, -5.0), (100, -2.0), (120, 0.0)], period=120.0)
+# The right hand comes up to the chest while he scans, a wary little gesture, and drops back as he settles.
+LOOK_HAND = Curve([(0, 0.0), (12, 0.0), (26, 1.0), (100, 1.0), (116, 0.0), (120, 0.0)], period=120.0)
+LOOK_HAND_AT_CHEST = Vector((-0.035, -0.16, -0.015))
 
 
 def clip_look_around(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.idle_body(frame, 120.0)
-    hips_look = LOOK_AROUND.scalar(frame - 5.0)
-    body_look = LOOK_AROUND.scalar(frame - 2.0)
+    spec = acting_idle(rig, frame, 120.0)
+    hips_look = LOOK_AROUND.scalar(frame - 6.0)
+    body_look = LOOK_AROUND.scalar(frame - 3.0)
     head_look = LOOK_AROUND.scalar(frame + 2.0)
-    spec.hips_offset += Vector((0.006 * hips_look / 38.0, 0.0, 0.0))
+    spec.hips_offset += Vector((0.008 * hips_look / 40.0, 0.0, 0.0))
     spec.hips = add_degrees(spec.hips, (0.0, 0.0, 0.12 * hips_look))
-    spec.spine = add_degrees(spec.spine, (0.0, 0.0, 0.17 * body_look))
+    spec.spine = add_degrees(spec.spine, (0.0, 0.03 * body_look, 0.17 * body_look))
     spec.chest = add_degrees(spec.chest, (0.0, 0.0, 0.2 * body_look))
     spec.neck = add_degrees(spec.neck, (LOOK_UP.scalar(frame) * 0.4, 0.0, 0.22 * head_look))
-    spec.head = add_degrees(spec.head, (LOOK_UP.scalar(frame) * 0.6, 0.04 * head_look, 0.29 * head_look))
+    spec.head = add_degrees(spec.head, (LOOK_UP.scalar(frame) * 0.6, 0.06 * head_look, 0.29 * head_look))
     for side in SIDES:
         spec.arms[side].swing += 0.05 * body_look * side_sign(side)
+    hand = LOOK_HAND.scalar(frame)
+    right = spec.arms[".R"]
+    idle_right = rig.idle_wrists[".R"]
+    right.wrist = idle_right.lerp(LOOK_HAND_AT_CHEST, hand) + Vector((0.0, -0.03, 0.0)) * math.sin(math.pi * hand)
+    right.pole = rig.idle_poles[".R"].lerp(Vector((-0.6, 0.6, -0.5)), hand)
+    right.aim = ((0.2, -0.3, 0.9), (0.3, 0.9, 0.0))
+    right.aim_weight = hand
+    right.finger_curls = finger_fan(9.0 + 22.0 * hand, 6.0 + 4.0 * hand, 2.0, frame / 120.0)
+    right.thumb = 14.0 + 16.0 * hand
     return spec
 
 
@@ -403,14 +470,15 @@ CHAT_FEET = {".L": (0.022, -0.072, 16.0, 0.0), ".R": (0.003, -0.002, -8.0, 0.0)}
 
 
 def clip_lean_chat(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.idle_body(frame, 120.0)
+    spec = acting_idle(rig, frame, 120.0)
     phase = frame / 120.0
     gesture = CHAT_GESTURE.scalar(frame)
     laugh = CHAT_LAUGH.scalar(frame)
     nod = CHAT_NOD.scalar(frame)
     giggle = laugh * math.sin(2.0 * math.pi * (frame - 64.0) / 6.0) if 64 <= frame <= 82 else 0.0
     spec.feet = rig_feet(rig, CHAT_FEET)
-    spec.hips_offset = Vector((-0.02 + 0.003 * math.sin(2.0 * math.pi * phase), -0.01, -0.02))
+    spec.hips_offset = Vector((-0.02 + 0.006 * math.sin(2.0 * math.pi * phase), -0.01,
+                               -0.02 - 0.002 * math.sin(2.0 * math.pi * (phase - 0.2))))
     spec.hips = (1.0, 4.0, -4.0)
     spec.spine = (3.0, -2.5, 3.0 + 2.0 * gesture)
     spec.chest = (4.0 + 2.0 * giggle + 2.0 * laugh, -2.0, 3.0 + 2.0 * gesture)
@@ -421,7 +489,8 @@ def clip_lean_chat(rig: CharacterRig, frame: float) -> BodySpec:
     left.wrist = Vector((0.155, 0.01, -0.235))
     left.pole = Vector((0.9, 0.35, 0.1))
     left.aim = ((-0.25, -0.5, -0.8), (-0.9, 0.2, 0.0))
-    left.fingers, left.thumb = 12.0, 25.0
+    left.finger_curls = finger_fan(8.0, 4.0, 2.0, phase)
+    left.thumb = 25.0
     left.shoulder = (0.0, 2.0 + 2.0 * giggle, 0.0)
     right = spec.arms[".R"]
     rest = Vector((-0.12, -0.13, -0.27))
@@ -437,7 +506,10 @@ def clip_lean_chat(rig: CharacterRig, frame: float) -> BodySpec:
     cover = ((0.4, 0.05, 0.9), (0.1, 0.95, -0.05))
     idle_aim = ((-0.1, -0.4, -0.9), (0.9, 0.2, 0.0))
     right.aim = _blend_aim(_blend_aim(idle_aim, open_palm, gesture), cover, laugh)
-    right.fingers = 15.0 - 8.0 * gesture + 5.0 * laugh
+    # The talking hand opens and fans as it turns up, then the fingers trail the beat; the laughing hand closes.
+    right.finger_curls = finger_fan(12.0 - 9.0 * gesture + 10.0 * laugh, 6.0 - 2.0 * gesture, 4.0 * gesture,
+                                    (frame - 22.0) / 10.0, 0.08)
+    right.splay = 9.0 * gesture * (1.0 - laugh)
     right.thumb = 12.0
     right.shoulder = (0.0, 2.0 * giggle, 0.0)
     spec.skirt_sway = 1.5
@@ -482,62 +554,78 @@ def clip_sweep(rig: CharacterRig, frame: float) -> BodySpec:
 
 
 def clip_wave(rig: CharacterRig, frame: float) -> BodySpec:
-    spec = rig.idle_body(frame, 45.0)
+    """A bright wave from the elbow: the hand trails each swing of the forearm and flicks over at its end, the body
+    bobs on the beats and leans into the greeting, and the head tilts against the hand."""
+    spec = acting_idle(rig, frame, 45.0)
     phase = frame / 45.0
-    wave = math.sin(2.0 * math.pi * 3.0 * phase)
-    bounce = math.cos(2.0 * math.pi * 3.0 * phase)
+    swing = math.sin(2.0 * math.pi * 3.0 * phase)
+    trail = math.sin(2.0 * math.pi * (3.0 * phase - 0.1))
+    bounce = 0.5 - 0.5 * math.cos(2.0 * math.pi * 6.0 * (phase - 0.03))
     spec.breath_amount = 0.6
-    spec.hips_offset += Vector((0.008, 0.0, -0.004 + 0.002 * bounce))
-    spec.spine = add_degrees(spec.spine, (0.0, 2.0, 2.0))
-    spec.chest = add_degrees(spec.chest, (-1.0, 2.5 + 0.6 * wave, 3.0))
-    spec.head = add_degrees(spec.head, (-1.0, -3.0 - 1.5 * wave, 3.0))
+    spec.hips_offset += Vector((0.008, -0.004, -0.006 + 0.004 * bounce))
+    spec.spine = add_degrees(spec.spine, (2.0, 2.0, 2.0))
+    spec.chest = add_degrees(spec.chest, (1.5, 2.5 + 0.8 * trail, 3.0))
+    spec.neck = add_degrees(spec.neck, (0.0, -1.0 - 0.8 * trail, 1.0))
+    spec.head = add_degrees(spec.head, (-1.0 + 1.0 * bounce, -5.0 - 2.0 * math.sin(2.0 * math.pi * (3.0 * phase - 0.18)), 3.0))
     right = spec.arms[".R"]
     skeleton = rig.skeleton
     pose = compose(rig, spec)
     world, heads = forward_kinematics(skeleton, pose)
     chest_inverse = world["chest"].inverted()
     shoulder = chest_inverse @ (heads["upper_arm.R"] - heads["chest"])
-    elbow = shoulder + Vector((-0.92, -0.3, 0.12)).normalized() * skeleton.length("upper_arm.R")
-    forearm = Quaternion(Vector((0.0, -1.0, 0.0)), math.radians(-20.0 * wave)) @ Vector((-0.15, -0.15, 0.97)).normalized()
+    elbow = shoulder + Vector((-0.92, -0.3, 0.12 + 0.03 * bounce)).normalized() * skeleton.length("upper_arm.R")
+    forearm = Quaternion(Vector((0.0, -1.0, 0.0)), math.radians(-22.0 * swing)) @ Vector((-0.15, -0.15, 0.97)).normalized()
     right.wrist = elbow + forearm * skeleton.length("forearm.R")
     right.pole = Vector((-0.4, 0.3, -0.85))
-    palm_tilt = Quaternion(Vector((0.0, -1.0, 0.0)), math.radians(-12.0 * wave))
+    palm_tilt = Quaternion(Vector((0.0, -1.0, 0.0)), math.radians(-16.0 * trail))
     right.aim = (palm_tilt @ forearm, palm_tilt @ Vector((-0.1, -1.0, 0.05)))
-    right.fingers, right.thumb = 4.0, 6.0
-    right.shoulder = (0.0, 6.0, 0.0)
+    right.finger_curls = finger_fan(2.0, 3.0, 4.0, 3.0 * phase - 0.15, 0.06)
+    right.splay = 10.0
+    right.thumb = 6.0
+    right.shoulder = (0.0, 6.0 + 1.5 * bounce, 0.0)
     left = spec.arms[".L"]
-    left.wrist = Vector((0.06, -0.15, -0.16))
+    left.wrist = Vector((0.06, -0.15, -0.16 + 0.008 * bounce))
     left.pole = Vector((0.8, 0.5, -0.4))
     left.aim = ((-0.5, -0.4, 0.6), (-0.5, 0.8, 0.2))
     left.aim_weight = 0.8
-    left.fingers, left.thumb = 35.0, 25.0
+    left.finger_curls = finger_fan(22.0, 8.0, 3.0, phase)
+    left.thumb = 25.0
     return spec
 
 
 SHY_FEET = {".L": (-0.023, -0.012, -6.0, 0.0), ".R": (0.018, -0.032, 10.0, 0.0)}
 
 
+SHY_GLANCE = Curve([(0, 0.0), (52, 0.0), (60, 1.0), (74, 1.0), (82, 0.0), (120, 0.0)], period=120.0)
+
+
 def clip_idle_shy(rig: CharacterRig, frame: float) -> BodySpec:
-    """Weight on the left leg, knees drawn together, hands clasped low, head down and tilted aside."""
+    """Weight on the left leg, knees drawn together, the right toe turned in and rocking, the fingers twiddling in the
+    clasped hands, the head down; once a loop he peeks up and ducks back."""
     phase = frame / 120.0
     sway = math.sin(2.0 * math.pi * phase)
     fidget = math.sin(2.0 * math.pi * 2.0 * phase)
-    spec = rig.idle_body(frame, 120.0)
-    spec.feet = rig_feet(rig, SHY_FEET)
-    spec.hips_offset = Vector((0.016 + 0.003 * sway, 0.004, -0.022))
-    spec.hips = (1.0, -3.0 + 0.6 * sway, 2.0)
+    glance = SHY_GLANCE.scalar(frame)
+    spec = acting_idle(rig, frame, 120.0)
+    x, y, yaw, pitch = SHY_FEET[".R"]
+    rock = 0.5 - 0.5 * math.cos(2.0 * math.pi * 3.0 * phase)
+    spec.feet = rig_feet(rig, {**SHY_FEET, ".R": (x, y, yaw + 4.0 * rock, pitch + 9.0 * rock)})
+    spec.hips_offset = Vector((0.016 + 0.005 * sway, 0.004, -0.022 - 0.002 * rock))
+    spec.hips = (1.0, -3.0 + 0.8 * sway, 2.0)
     spec.spine = (2.0, 2.0, -1.5)
-    spec.chest = (3.0, 1.5 + 0.4 * sway, -1.0)
-    spec.neck = (3.0, 2.0, 2.0)
-    spec.head = (5.0 + 0.8 * fidget, 6.0 + 0.8 * sway, 6.0 + 1.5 * math.sin(2.0 * math.pi * (phase - 0.2)))
+    spec.chest = (3.0 - 1.0 * glance, 1.5 + 0.5 * math.sin(2.0 * math.pi * (phase - 0.08)), -1.0)
+    spec.neck = (3.0 - 3.0 * SHY_GLANCE.scalar(frame - 2.0), 2.0, 2.0)
+    spec.head = (5.0 + 0.8 * fidget - 9.0 * glance, 6.0 + 0.8 * math.sin(2.0 * math.pi * (phase - 0.16)) - 2.0 * glance,
+                 6.0 + 1.5 * math.sin(2.0 * math.pi * (phase - 0.2)))
     for side in SIDES:
         arm = spec.arms[side]
-        arm.shoulder = (0.0, 4.0, -4.0)
+        arm.shoulder = (0.0, 4.0 + 1.0 * glance, -4.0)
         arm.wrist = Vector((side_sign(side) * 0.018, -0.14 + 0.004 * fidget, -0.265 + side_sign(side) * 0.008))
         arm.pole = Vector((side_sign(side) * 0.8, 0.5, -0.3))
         arm.aim = ((-side_sign(side) * 0.55, -0.35, -0.75), (-side_sign(side) * 0.75, 0.55, -0.2))
-        arm.fingers = 35.0 + 4.0 * fidget * side_sign(side)
-        arm.thumb = 25.0
+        twiddle = 3.0 * phase * 2.0 + (0.0 if side == ".L" else 0.5)
+        arm.finger_curls = finger_fan(30.0, 5.0, 10.0, twiddle, 0.1)
+        arm.thumb = 25.0 + 12.0 * math.sin(2.0 * math.pi * twiddle)
     spec.skirt_sway = 0.8 * sway
     return spec
 
@@ -550,27 +638,31 @@ def clip_idle_playful(rig: CharacterRig, frame: float) -> BodySpec:
     phase = frame / 90.0
     bounce = 0.5 - 0.5 * math.cos(2.0 * math.pi * 3.0 * phase)
     sway = math.sin(2.0 * math.pi * phase)
-    spec = rig.idle_body(frame, 90.0)
+    spec = acting_idle(rig, frame, 90.0)
     x, y, yaw, pitch = PLAYFUL_FEET[".R"]
     spec.feet = rig_feet(rig, {**PLAYFUL_FEET, ".R": (x, y, yaw, pitch + 6.0 * bounce)})
     spec.hips_offset = Vector((0.020 + 0.004 * sway, 0.006, -0.018 - 0.008 * bounce))
     spec.hips = (0.0, 6.0, 3.0 + 2.0 * sway)
     spec.spine = (-1.0, -3.0, -2.0)
-    spec.chest = (-2.0, -2.0 + 0.8 * sway, -2.0 * sway)
+    spec.chest = (-2.0, -2.0 + 0.8 * math.sin(2.0 * math.pi * (phase - 0.06)), -2.0 * math.sin(2.0 * math.pi * (phase - 0.06)))
     spec.neck = (0.0, -3.0, 2.0)
-    spec.head = (1.5 - 1.5 * bounce, -10.0 + 1.5 * sway, 4.0 + 2.0 * sway)
+    # The head rides the bounce a beat late and swings its tilt against the hips.
+    late_bounce = 0.5 - 0.5 * math.cos(2.0 * math.pi * 3.0 * (phase - 0.04))
+    spec.head = (1.5 - 1.5 * late_bounce, -10.0 + 2.0 * math.sin(2.0 * math.pi * (phase - 0.15)),
+                 4.0 + 2.5 * math.sin(2.0 * math.pi * (phase - 0.12)))
     for side in SIDES:
         arm = spec.arms[side]
         arm.wrist = Vector((side_sign(side) * 0.03, 0.16, -0.275 + 0.006 * bounce))
         arm.pole = Vector((side_sign(side) * 0.9, 0.2, 0.3))
         arm.aim = ((-side_sign(side) * 0.6, 0.25, -0.75), (-side_sign(side) * 0.3, 0.9, 0.2))
-        arm.fingers = 30.0
+        arm.finger_curls = finger_fan(40.0, 6.0, 4.0, 3.0 * phase, 0.08)
         arm.thumb = 20.0
-        arm.shoulder = (0.0, 2.0 * bounce, 3.0)
+        arm.shoulder = (0.0, 2.0 * late_bounce, 3.0)
     spec.skirt_sway = 2.0 * sway
     return spec
 
 
+CONFIDENT_POP = Curve([(0, 0.0), (48, 0.0), (58, 1.0), (70, 0.8), (88, 0.0), (120, 0.0)], period=120.0)
 CONFIDENT_FEET = {".L": (0.037, -0.087, 18.0, 0.0), ".R": (0.028, -0.007, -9.0, 0.0)}
 
 
@@ -578,11 +670,13 @@ def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
     """Weight on the right leg, the left hand on the hip, the chin up."""
     phase = frame / 120.0
     sway = math.sin(2.0 * math.pi * phase)
-    spec = rig.idle_body(frame, 120.0)
+    spec = acting_idle(rig, frame, 120.0)
     spec.feet = rig_feet(rig, CONFIDENT_FEET)
-    spec.hips_offset = Vector((-0.024 + 0.003 * sway, 0.0, -0.02))
-    spec.hips = (0.0, 4.5, -5.0)
-    spec.spine = (-1.5, -2.5, 3.0)
+    # A slow rock onto the standing leg with a small hip pop at its far end.
+    pop = CONFIDENT_POP.scalar(frame)
+    spec.hips_offset = Vector((-0.024 + 0.004 * sway - 0.006 * pop, 0.0, -0.02 - 0.002 * pop))
+    spec.hips = (0.0, 4.5 + 1.5 * pop, -5.0)
+    spec.spine = (-1.5, -2.5 - 1.0 * CONFIDENT_POP.scalar(frame - 3.0), 3.0)
     spec.chest = (-2.0, -2.0 + 0.5 * sway, 2.0)
     spec.neck = (-2.0, 1.0, -1.0)
     spec.head = (-6.0 + 1.0 * sway, 3.0, -4.0 + 2.0 * math.sin(2.0 * math.pi * (phase - 0.3)))
@@ -590,7 +684,9 @@ def clip_idle_confident(rig: CharacterRig, frame: float) -> BodySpec:
     left.wrist = Vector((0.150, 0.012, -0.200))
     left.pole = Vector((0.9, 0.35, 0.1))
     left.aim = ((-0.25, -0.5, -0.8), (-0.9, 0.2, 0.0))
-    left.fingers, left.thumb = 14.0, 25.0
+    left.finger_curls = finger_fan(6.0, 5.0, 2.0, phase)
+    left.thumb = 25.0
+    left.splay = 3.0
     right = spec.arms[".R"]
     right.adduct = 18.0
     right.swing = 3.0 + 1.0 * sway

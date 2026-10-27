@@ -46,6 +46,9 @@ class ArmSpec:
     fingers: float = 18.0
     thumb: float = 10.0
     shoulder: tuple = (0.0, 0.0, 0.0)
+    # Per-finger curls ("index", "middle", "ring", "pinky" -> degrees) over `fingers`, and a fan of the fingers.
+    finger_curls: dict | None = None
+    splay: float = 0.0
 
 
 @dataclass
@@ -339,7 +342,7 @@ def _pose_arm(rig: CharacterRig, pose: Pose, side: str, arm: ArmSpec) -> None:
             aimed.negate()
         set_world_rotation(skeleton, pose, f"hand{side}", current.slerp(aimed, arm.aim_weight))
         share_twist(skeleton, pose, f"forearm{side}", f"hand{side}", 0.5)
-    curl_fingers(skeleton, pose, side, arm.fingers, arm.thumb)
+    curl_fingers(skeleton, pose, side, arm.fingers, arm.thumb, arm.finger_curls, arm.splay)
 
 
 # ---------------------------------------------------------------------------------------------------
