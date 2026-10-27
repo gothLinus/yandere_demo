@@ -14,6 +14,22 @@ LOOP_SEAM_TOLERANCE = 1e-4
 ANIMATION_FPS = 30
 
 
+def _play(armature, action_name: str):
+    """Assign an action to the armature; returns the action it replaced."""
+    action = bpy.data.actions[action_name]
+    animation_data = armature.animation_data_create()
+    previous_action = animation_data.action
+    animation_data.action = action
+    if hasattr(animation_data, "action_slot") and action.slots:
+        animation_data.action_slot = action.slots[0]
+    return previous_action
+
+
+def _action_frames(action_name: str) -> range:
+    start, end = bpy.data.actions[action_name].frame_range
+    return range(int(start), int(end) + 1)
+
+
 def validate_character(
     prefix: str,
     required_shape_keys: list[str],
@@ -160,12 +176,15 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
                            braid_clear_actions: list[str] | None = None,
                            floor_actions: list[str] | None = None,
                            seated_actions: list[str] | None = None,
-                           sit_transition_actions: list[str] | None = None) -> list[str]:
+                           sit_transition_actions: list[str] | None = None,
+                           walk_action: str | None = None, walk_speed: float = 0.0,
+                           hold_actions: list[str] | None = None) -> list[str]:
     """Checks for the Astolfo target (Task 23a): the crown height, the triangle budget, the model's own bones, skinned
     fingers, no leg poking through the skirt in `skirt_clear_actions`, no braid or bow (`braid_bones` on
     `braid_meshes`) sinking into the skirt in `braid_clear_actions`, no shoe sinking into the floor in
     `floor_actions`, in `seated_actions` the knees together with the front of the skirt draped over the lap, and in
-    those and `sit_transition_actions` nothing under the skirt in sight of a low front camera."""
+    those and `sit_transition_actions` nothing under the skirt in sight of a low front camera, no planted sole sliding in
+    `walk_action` at `walk_speed`, and breathing or a weight shift moving the hips in every one of `hold_actions`."""
     errors: list[str] = []
     armature = bpy.data.objects.get(f"{prefix}Char")
     if armature is None:
@@ -212,7 +231,22 @@ def validate_target_extras(prefix: str, height: float, triangle_budget: int, req
             errors += _validate_seated_sightlines(prefix, armature, action_name)
     for action_name in sit_transition_actions or []:
         if bpy.data.actions.get(action_name) is not None:
+            errors += _validate_knees_together(armature, action_name)
             errors += _validate_seated_sightlines(prefix, armature, action_name)
+    if walk_action is not None and bpy.data.actions.get(walk_action) is not None:
+        slides = [(frame, side, slip) for frame, side, slip in foot_slides(prefix, walk_action, walk_speed)
+                  if slip > FOOT_SLIDE_LIMIT]
+        if slides:
+            frame, side, slip = max(slides, key=lambda item: item[2])
+            errors.append(f"{walk_action}: a planted foot slides in {len(slides)} frames at {walk_speed} m/s "
+                          f"(worst frame {frame}, foot{side}: {slip * 1000:.1f} mm, limit {FOOT_SLIDE_LIMIT * 1000:.0f})")
+    for action_name in hold_actions or []:
+        if bpy.data.actions.get(action_name) is None:
+            continue
+        amplitude = hips_amplitude(armature, action_name)
+        if amplitude <= HOLD_HIPS_MIN_AMPLITUDE:
+            errors.append(f"{action_name}: the hips move {amplitude * 1000:.1f} mm, a hold needs breathing or a weight "
+                          f"shift of more than {HOLD_HIPS_MIN_AMPLITUDE * 1000:.0f} mm")
     body = bpy.data.objects.get(f"{prefix}Body")
     if body is not None:
         group_names = {group.name for group in body.vertex_groups}
@@ -230,33 +264,37 @@ FRONT_SKIRT_CHAINS = ("skirt_07", "skirt_00", "skirt_01")
 FRONT_SKIRT_MAX_LIFT_DEGREES = 15.0
 
 
-def _validate_seated_coverage(armature, action_name: str) -> list[str]:
-    action = bpy.data.actions[action_name]
-    animation_data = armature.animation_data_create()
-    previous_action = animation_data.action
-    animation_data.action = action
-    if hasattr(animation_data, "action_slot") and action.slots:
-        animation_data.action_slot = action.slots[0]
+def _validate_knees_together(armature, action_name: str) -> list[str]:
+    """The knees are never further apart than the hip joints (addendum §3.6)."""
+    previous_action = _play(armature, action_name)
     pose_bones = armature.pose.bones
-    front_bones = [bone for bone in pose_bones if bone.name.startswith(FRONT_SKIRT_CHAINS)]
     widest = (0.0, 0, 0.0)
-    steepest = (-90.0, 0, "")
-    for frame in range(int(action.frame_range[0]), int(action.frame_range[1]) + 1):
+    for frame in _action_frames(action_name):
         bpy.context.scene.frame_set(frame)
         knees = (pose_bones["shin.L"].head - pose_bones["shin.R"].head).length
         hips = (pose_bones["thigh.L"].head - pose_bones["thigh.R"].head).length
         if knees - hips > widest[0]:
             widest = (knees - hips, frame, knees)
+    armature.animation_data.action = previous_action
+    if widest[0] > 0.0:
+        return [f"{action_name}: the knees are {widest[2]:.3f} m apart in frame {widest[1]}, "
+                f"{widest[0]:.3f} m wider than the hips"]
+    return []
+
+
+def _validate_seated_coverage(armature, action_name: str) -> list[str]:
+    errors = _validate_knees_together(armature, action_name)
+    previous_action = _play(armature, action_name)
+    front_bones = [bone for bone in armature.pose.bones if bone.name.startswith(FRONT_SKIRT_CHAINS)]
+    steepest = (-90.0, 0, "")
+    for frame in _action_frames(action_name):
+        bpy.context.scene.frame_set(frame)
         for bone in front_bones:
             direction = (bone.tail - bone.head).normalized()
             lift = math.degrees(math.asin(max(-1.0, min(1.0, direction.z))))
             if lift > steepest[0]:
                 steepest = (lift, frame, bone.name)
-    animation_data.action = previous_action
-    errors = []
-    if widest[0] > 0.0:
-        errors.append(f"{action_name}: the knees are {widest[2]:.3f} m apart in frame {widest[1]}, "
-                      f"{widest[0]:.3f} m wider than the hips")
+    armature.animation_data.action = previous_action
     if steepest[0] > FRONT_SKIRT_MAX_LIFT_DEGREES:
         errors.append(f"{action_name}: {steepest[2]} lifts {steepest[0]:.1f} degrees above horizontal in frame "
                       f"{steepest[1]} (limit {FRONT_SKIRT_MAX_LIFT_DEGREES:.0f})")
@@ -360,6 +398,54 @@ def _validate_seated_sightlines(prefix: str, armature, action_name: str) -> list
 
 
 FLOOR_TOLERANCE = 0.005
+
+
+# A planted sole moves with the ground, which slides back under the in-place walk at the walk speed; a sole vertex
+# touching the floor in two frames running is planted.
+FOOT_SLIDE_LIMIT = 0.01
+FOOT_CONTACT_HEIGHT = 0.005
+# A hold is alive when the hips drift this far from their mean position at some point of the loop.
+HOLD_HIPS_MIN_AMPLITUDE = 0.003
+
+
+def foot_slides(prefix: str, action_name: str, speed: float) -> list[tuple[int, str, float]]:
+    """(frame, side, slip in metres) for each foot planted from one frame to the next.
+
+    The slip is the mean horizontal distance by which the foot's touching sole vertices miss the ground's own step
+    (`speed` backward, +Y, per frame)."""
+    armature = bpy.data.objects[f"{prefix}Char"]
+    shoes = bpy.data.objects[f"{prefix}Shoes"]
+    previous_action = _play(armature, action_name)
+    scene = bpy.context.scene
+    ground_step = Vector((0.0, speed / ANIMATION_FPS, 0.0))
+    soles = []
+    for frame in _action_frames(action_name):
+        scene.frame_set(frame)
+        evaluated = shoes.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        mesh = evaluated.to_mesh()
+        soles.append([shoes.matrix_world @ vertex.co for vertex in mesh.vertices])
+        evaluated.to_mesh_clear()
+    armature.animation_data.action = previous_action
+    results = []
+    for frame, (before, after) in enumerate(zip(soles, soles[1:])):
+        for side, sign in ((".L", 1.0), (".R", -1.0)):
+            slips = [((end - start) - ground_step).xy.length for start, end in zip(before, after)
+                     if start.x * sign > 0.0 and start.z <= FOOT_CONTACT_HEIGHT and end.z <= FOOT_CONTACT_HEIGHT]
+            if slips:
+                results.append((frame, side, sum(slips) / len(slips)))
+    return results
+
+
+def hips_amplitude(armature, action_name: str) -> float:
+    """Largest distance of the hips joint from its mean position over an action."""
+    previous_action = _play(armature, action_name)
+    positions = []
+    for frame in _action_frames(action_name):
+        bpy.context.scene.frame_set(frame)
+        positions.append(armature.matrix_world @ armature.pose.bones["hips"].head)
+    armature.animation_data.action = previous_action
+    mean = sum(positions, Vector()) / len(positions)
+    return max((position - mean).length for position in positions)
 
 
 def sole_floor_depths(prefix: str, action_name: str) -> list[tuple[int, float]]:

@@ -55,20 +55,32 @@ func _ready() -> void:
 	if skeleton == null:
 		push_error("TargetProps: no Skeleton3D at %s" % skeleton_path)
 		return
-	var builders: Dictionary[StringName, Callable] = {
-		BOOK: _make_book, PHONE: _make_phone, CAN: _make_can, BROOM: _make_broom,
-	}
-	for prop_name: StringName in builders:
+	for prop_name: StringName in PROP_BONES:
 		var attachment: BoneAttachment3D = BoneAttachment3D.new()
 		attachment.name = "%sAttachment" % String(prop_name).capitalize()
 		attachment.bone_name = PROP_BONES[prop_name]
 		skeleton.add_child(attachment)
-		var prop: Node3D = builders[prop_name].call()
-		prop.name = String(prop_name).capitalize()
-		prop.transform = PROP_PLACEMENTS[prop_name]
+		var prop: Node3D = build_prop(prop_name)
 		prop.visible = false
 		attachment.add_child(prop)
 		_props[prop_name] = prop
+
+
+## The prop's meshes, placed in its hand bone's space.
+static func build_prop(prop_name: StringName) -> Node3D:
+	var prop: Node3D
+	match prop_name:
+		BOOK:
+			prop = _make_book()
+		PHONE:
+			prop = _make_phone()
+		CAN:
+			prop = _make_can()
+		_:
+			prop = _make_broom()
+	prop.name = String(prop_name).capitalize()
+	prop.transform = PROP_PLACEMENTS[prop_name]
+	return prop
 
 
 func show_for(animation_name: StringName) -> void:
@@ -77,7 +89,7 @@ func show_for(animation_name: StringName) -> void:
 		_props[prop_name].visible = prop_name == wanted
 
 
-func _make_book() -> Node3D:
+static func _make_book() -> Node3D:
 	var book: Node3D = Node3D.new()
 	book.add_child(_box(BOOK_SIZE, BOOK_COLOR, Vector3.ZERO))
 	var pages: Vector3 = BOOK_SIZE - Vector3(PAGE_INSET, PAGE_INSET, -PAGE_INSET)
@@ -85,7 +97,7 @@ func _make_book() -> Node3D:
 	return book
 
 
-func _make_phone() -> Node3D:
+static func _make_phone() -> Node3D:
 	var phone: Node3D = Node3D.new()
 	phone.add_child(_box(PHONE_SIZE, PHONE_COLOR, Vector3.ZERO))
 	var screen: Vector3 = Vector3(PHONE_SIZE.x - SCREEN_INSET, PHONE_SIZE.y - SCREEN_INSET, PHONE_SIZE.z * 0.2)
@@ -93,7 +105,7 @@ func _make_phone() -> Node3D:
 	return phone
 
 
-func _make_can() -> Node3D:
+static func _make_can() -> Node3D:
 	var can: Node3D = Node3D.new()
 	var mesh: CylinderMesh = CylinderMesh.new()
 	mesh.top_radius = CAN_RADIUS
@@ -106,7 +118,7 @@ func _make_can() -> Node3D:
 	return can
 
 
-func _make_broom() -> Node3D:
+static func _make_broom() -> Node3D:
 	var broom: Node3D = Node3D.new()
 	var handle: CylinderMesh = CylinderMesh.new()
 	handle.top_radius = BROOM_HANDLE_RADIUS
@@ -121,7 +133,7 @@ func _make_broom() -> Node3D:
 	return broom
 
 
-func _box(size: Vector3, color: Color, offset: Vector3) -> MeshInstance3D:
+static func _box(size: Vector3, color: Color, offset: Vector3) -> MeshInstance3D:
 	var mesh: BoxMesh = BoxMesh.new()
 	mesh.size = size
 	mesh.material = _material(color)
@@ -131,7 +143,7 @@ func _box(size: Vector3, color: Color, offset: Vector3) -> MeshInstance3D:
 	return instance
 
 
-func _material(color: Color) -> ShaderMaterial:
+static func _material(color: Color) -> ShaderMaterial:
 	var source: StandardMaterial3D = StandardMaterial3D.new()
 	source.resource_name = "M_TargetProp"
 	source.albedo_color = color

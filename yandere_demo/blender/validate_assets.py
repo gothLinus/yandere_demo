@@ -44,6 +44,9 @@ BRAID_CLEAR_ACTIONS = ["target_idle", "target_walk_routine", "target_notice_play
 # transitions only have to keep it out of sight.
 SEATED_ACTIONS = ["target_sit", "target_sit_read", "target_phone"]
 SIT_TRANSITION_ACTIONS = ["target_sit_down", "target_stand_up"]
+# The walk is keyed for this speed (TargetAI.WALK_CLIP_SPEED); its planted feet must not slide at it.
+WALK_ACTION = "target_walk_routine"
+WALK_SPEED = 1.3
 # Action name -> (frame count at 30 fps, loops).
 TARGET_ACTIONS = {
     "target_idle": (90, True),
@@ -115,6 +118,8 @@ CHECKS = {
             "floor_actions": list(TARGET_ACTIONS),
             "seated_actions": SEATED_ACTIONS,
             "sit_transition_actions": SIT_TRANSITION_ACTIONS,
+            # Every looping clip but the walk is a hold: it breathes or shifts its weight.
+            "hold_actions": [name for name, (_, loops) in TARGET_ACTIONS.items() if loops and name != WALK_ACTION],
         },
     },
     "player": {
@@ -209,7 +214,8 @@ def run_check(check_name: str) -> list[str]:
                                          braid.resting_bones + braid.bow_bones, braid.meshes,
                                          extras["skirt_clear_actions"], extras["braid_clear_actions"],
                                          extras["floor_actions"], extras["seated_actions"],
-                                         extras["sit_transition_actions"])
+                                         extras["sit_transition_actions"], WALK_ACTION, WALK_SPEED,
+                                         extras["hold_actions"])
     if "cast_extras" in check:
         errors += validate_cast_extras(check["prefix"], check["shape_keys"], **check["cast_extras"])
     return errors
