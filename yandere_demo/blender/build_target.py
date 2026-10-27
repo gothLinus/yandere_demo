@@ -40,9 +40,11 @@ def main() -> None:
     stance = astolfo.measure_stance(armature, meshes, landmarks)
     target_animations.build_target_actions(armature, stance, astolfo.braid_layout(armature))
     scene.save_and_export(armature, BLEND_PATH, GLB_PATH)
+    print(astolfo.secondary_motion_report(armature, meshes))
     print(f"eyes at {tuple(round(value, 4) for value in landmarks.eyes)}, mouth at "
           f"{tuple(round(value, 4) for value in landmarks.mouth)}, seat clearance {stance.seat_clearance:.4f}, "
-          f"heel back {stance.heel_back:.4f}, lap offset {tuple(round(value, 4) for value in stance.lap_offset)}")
+          f"heel back {stance.heel_back:.4f}, lap offset {tuple(round(value, 4) for value in stance.lap_offset)}, "
+          f"leg radii {tuple(round(value, 4) for value in stance.leg_radii)}")
 
 
 # blender-mcp's exec(source, {"__file__": path}) leaves __name__ as "builtins".

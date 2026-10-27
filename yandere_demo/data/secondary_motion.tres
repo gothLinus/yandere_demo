@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="SecondaryMotionTuning" load_steps=16 format=3]
+[gd_resource type="Resource" script_class="SecondaryMotionTuning" load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/core/secondary_motion_tuning.gd" id="1_tuning"]
 [ext_resource type="Script" path="res://scripts/core/secondary_chain_setting.gd" id="2_chain"]
@@ -12,8 +12,8 @@ drag = 0.5
 gravity = 0.2
 radius = 0.03
 root_bones = PackedStringArray("braid_01")
-end_bones = PackedStringArray("braid_10")
-end_bone_lengths = PackedFloat32Array(0.0658)
+end_bones = PackedStringArray("braid_06")
+end_bone_lengths = PackedFloat32Array(0.2043)
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"chest", &"hips"])
@@ -22,20 +22,6 @@ animation_influence = Dictionary[StringName, float]({
 &"target_fix_braid": 0.0
 })
 
-[sub_resource type="Resource" id="chain_ahoge"]
-script = ExtResource("2_chain")
-chain_prefix = &"ahoge"
-stiffness = 2.0
-drag = 0.15
-gravity = 0.1
-radius = 0.01
-root_bones = PackedStringArray("ahoge_01")
-end_bones = PackedStringArray("ahoge_03")
-end_bone_lengths = PackedFloat32Array(0.0328)
-extend_end_bone = true
-end_bone_direction = 2
-colliders = Array[StringName]([])
-
 [sub_resource type="Resource" id="chain_hair_front"]
 script = ExtResource("2_chain")
 chain_prefix = &"hair_front"
@@ -43,12 +29,12 @@ stiffness = 1.6
 drag = 0.35
 gravity = 0.3
 radius = 0.015
-root_bones = PackedStringArray("hair_front_L_01", "hair_front_C_01", "hair_front_R_01")
-end_bones = PackedStringArray("hair_front_L_02", "hair_front_C_02", "hair_front_R_02")
-end_bone_lengths = PackedFloat32Array(0.056, 0.056, 0.056)
+root_bones = PackedStringArray("hair_front_C_01", "hair_front_L_01", "hair_front_L_02", "hair_front_L_03", "hair_front_R_01", "hair_front_R_02", "hair_front_R_03")
+end_bones = PackedStringArray("hair_front_C_01", "hair_front_L_01", "hair_front_L_02", "hair_front_L_03", "hair_front_R_01", "hair_front_R_02", "hair_front_R_03")
+end_bone_lengths = PackedFloat32Array(0.0951, 0.0773, 0.113, 0.1823, 0.0831, 0.1128, 0.1461)
 extend_end_bone = true
 end_bone_direction = 2
-colliders = Array[StringName]([])
+colliders = Array[StringName]([&"head"])
 
 [sub_resource type="Resource" id="chain_hair_side"]
 script = ExtResource("2_chain")
@@ -57,37 +43,51 @@ stiffness = 1.2
 drag = 0.4
 gravity = 0.5
 radius = 0.02
-root_bones = PackedStringArray("hair_side_L_01", "hair_side_R_01")
-end_bones = PackedStringArray("hair_side_L_03", "hair_side_R_03")
-end_bone_lengths = PackedFloat32Array(0.0412, 0.0412)
+root_bones = PackedStringArray("hair_side_L_01", "hair_side_L_02", "hair_side_L_03", "hair_side_L_04", "hair_side_R_01", "hair_side_R_02", "hair_side_R_03", "hair_side_R_04")
+end_bones = PackedStringArray("hair_side_L_01", "hair_side_L_02", "hair_side_L_03", "hair_side_L_04", "hair_side_R_01", "hair_side_R_02", "hair_side_R_03", "hair_side_R_04")
+end_bone_lengths = PackedFloat32Array(0.0989, 0.1265, 0.1177, 0.135, 0.1157, 0.1264, 0.1206, 0.1349)
 extend_end_bone = true
 end_bone_direction = 2
-colliders = Array[StringName]([])
+colliders = Array[StringName]([&"head"])
 
-[sub_resource type="Resource" id="chain_neckerchief"]
+[sub_resource type="Resource" id="chain_hair_back"]
 script = ExtResource("2_chain")
-chain_prefix = &"neckerchief"
+chain_prefix = &"hair_back"
+stiffness = 1.2
+drag = 0.4
+gravity = 0.5
+radius = 0.02
+root_bones = PackedStringArray("hair_back_C_01", "hair_back_L_01", "hair_back_L_02", "hair_back_L_03", "hair_back_L_04", "hair_back_R_01", "hair_back_R_02", "hair_back_R_03", "hair_back_R_04")
+end_bones = PackedStringArray("hair_back_C_01", "hair_back_L_01", "hair_back_L_02", "hair_back_L_03", "hair_back_L_04", "hair_back_R_01", "hair_back_R_02", "hair_back_R_03", "hair_back_R_04")
+end_bone_lengths = PackedFloat32Array(0.0997, 0.1116, 0.1612, 0.1513, 0.1032, 0.1126, 0.161, 0.1502, 0.1039)
+extend_end_bone = true
+end_bone_direction = 2
+colliders = Array[StringName]([&"head"])
+
+[sub_resource type="Resource" id="chain_head_bow"]
+script = ExtResource("2_chain")
+chain_prefix = &"head_bow"
+stiffness = 2.5
+drag = 0.5
+gravity = 0.2
+radius = 0.015
+root_bones = PackedStringArray("head_bow_L_01", "head_bow_L_02", "head_bow_L_03", "head_bow_L_04", "head_bow_R_01", "head_bow_R_02", "head_bow_R_03", "head_bow_R_04")
+end_bones = PackedStringArray("head_bow_L_01", "head_bow_L_02", "head_bow_L_03", "head_bow_L_04", "head_bow_R_01", "head_bow_R_02", "head_bow_R_03", "head_bow_R_04")
+end_bone_lengths = PackedFloat32Array(0.0937, 0.0507, 0.0916, 0.0548, 0.0939, 0.0507, 0.0917, 0.0548)
+extend_end_bone = true
+end_bone_direction = 2
+colliders = Array[StringName]([&"head"])
+
+[sub_resource type="Resource" id="chain_ribbon"]
+script = ExtResource("2_chain")
+chain_prefix = &"ribbon"
 stiffness = 1.0
 drag = 0.45
 gravity = 0.6
 radius = 0.015
-root_bones = PackedStringArray("neckerchief_L_01", "neckerchief_R_01")
-end_bones = PackedStringArray("neckerchief_L_02", "neckerchief_R_02")
-end_bone_lengths = PackedFloat32Array(0.0637, 0.0575)
-extend_end_bone = true
-end_bone_direction = 2
-colliders = Array[StringName]([&"chest"])
-
-[sub_resource type="Resource" id="chain_sleeve"]
-script = ExtResource("2_chain")
-chain_prefix = &"sleeve"
-stiffness = 2.5
-drag = 0.6
-gravity = 0.2
-radius = 0.03
-root_bones = PackedStringArray("sleeve_L_01", "sleeve_R_01")
-end_bones = PackedStringArray("sleeve_L_01", "sleeve_R_01")
-end_bone_lengths = PackedFloat32Array(0.0974, 0.0974)
+root_bones = PackedStringArray("ribbon_L_01", "ribbon_R_01")
+end_bones = PackedStringArray("ribbon_L_02", "ribbon_R_02")
+end_bone_lengths = PackedFloat32Array(0.1173, 0.135)
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"chest"])
@@ -101,7 +101,7 @@ gravity = 0.1
 radius = 0.025
 root_bones = PackedStringArray("skirt_00_01", "skirt_01_01", "skirt_02_01", "skirt_03_01", "skirt_04_01", "skirt_05_01", "skirt_06_01", "skirt_07_01")
 end_bones = PackedStringArray("skirt_00_03", "skirt_01_03", "skirt_02_03", "skirt_03_03", "skirt_04_03", "skirt_05_03", "skirt_06_03", "skirt_07_03")
-end_bone_lengths = PackedFloat32Array(0.169, 0.1691, 0.1694, 0.1691, 0.169, 0.1691, 0.1694, 0.1691)
+end_bone_lengths = PackedFloat32Array(0.0875, 0.0884, 0.0877, 0.0877, 0.0874, 0.0876, 0.0878, 0.0884)
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"thigh.L", &"thigh.R", &"hips"])
@@ -114,9 +114,9 @@ stiffness = 3.0
 drag = 0.4
 gravity = 0.2
 radius = 0.02
-root_bones = PackedStringArray("braid_bow")
-end_bones = PackedStringArray("braid_bow")
-end_bone_lengths = PackedFloat32Array(0.06)
+root_bones = PackedStringArray("braid_bow_01", "braid_bow_02", "braid_bow_03", "braid_bow_04")
+end_bones = PackedStringArray("braid_bow_01", "braid_bow_02", "braid_bow_03", "braid_bow_04")
+end_bone_lengths = PackedFloat32Array(0.12, 0.1533, 0.12, 0.1533)
 extend_end_bone = true
 end_bone_direction = 2
 colliders = Array[StringName]([&"hips", &"thigh.L", &"thigh.R"])
@@ -125,36 +125,44 @@ influence = 0.3
 [sub_resource type="Resource" id="collider_thigh_L"]
 script = ExtResource("3_collider")
 bone = &"thigh.L"
-radius = 0.065
-height = 0.4305
-position_offset = Vector3(-0.0448, 0.2765, 0.0108)
-rotation_offset = Quaternion(-0.00146, 0, -0.08358, 0.9965)
+radius = 0.0487
+height = 0.5612
+position_offset = Vector3(-0.008, 0.2619, 0.0064)
+rotation_offset = Quaternion(0, 0, 0, 1)
 
 [sub_resource type="Resource" id="collider_thigh_R"]
 script = ExtResource("3_collider")
 bone = &"thigh.R"
-radius = 0.065
-height = 0.4305
-position_offset = Vector3(0.0448, 0.2765, 0.0108)
-rotation_offset = Quaternion(-0.00146, 0, 0.08358, 0.9965)
+radius = 0.0433
+height = 0.5504
+position_offset = Vector3(0.008, 0.2619, 0.0064)
+rotation_offset = Quaternion(0, 0, 0, 1)
 
 [sub_resource type="Resource" id="collider_hips"]
 script = ExtResource("3_collider")
 bone = &"hips"
-radius = 0.12
-height = 0.24
-position_offset = Vector3(0, 0.018, 0.0009)
+radius = 0.0695
+height = 0.139
+position_offset = Vector3(0, 0.004, -0.0248)
 rotation_offset = Quaternion(0, 0, 0, 1)
 
 [sub_resource type="Resource" id="collider_chest"]
 script = ExtResource("3_collider")
 bone = &"chest"
-radius = 0.11
-height = 0.3571
-position_offset = Vector3(0.0298, 0.0818, -0.0025)
-rotation_offset = Quaternion(0.28024, 0, -0.2456, 0.92798)
+radius = 0.0749
+height = 0.5085
+position_offset = Vector3(0, 0.0365, 0.0421)
+rotation_offset = Quaternion(0, 0, 0, 1)
+
+[sub_resource type="Resource" id="collider_head"]
+script = ExtResource("3_collider")
+bone = &"head"
+radius = 0.085
+height = 0.17
+position_offset = Vector3(0, 0.1062, 0.0668)
+rotation_offset = Quaternion(0, 0, 0, 1)
 
 [resource]
 script = ExtResource("1_tuning")
-chains = Array[ExtResource("2_chain")]([SubResource("chain_braid"), SubResource("chain_ahoge"), SubResource("chain_hair_front"), SubResource("chain_hair_side"), SubResource("chain_neckerchief"), SubResource("chain_sleeve"), SubResource("chain_skirt"), SubResource("chain_braid_bow")])
-colliders = Array[ExtResource("3_collider")]([SubResource("collider_thigh_L"), SubResource("collider_thigh_R"), SubResource("collider_hips"), SubResource("collider_chest")])
+chains = Array[ExtResource("2_chain")]([SubResource("chain_braid"), SubResource("chain_hair_front"), SubResource("chain_hair_side"), SubResource("chain_hair_back"), SubResource("chain_head_bow"), SubResource("chain_ribbon"), SubResource("chain_skirt"), SubResource("chain_braid_bow")])
+colliders = Array[ExtResource("3_collider")]([SubResource("collider_thigh_L"), SubResource("collider_thigh_R"), SubResource("collider_hips"), SubResource("collider_chest"), SubResource("collider_head")])

@@ -14,7 +14,7 @@ from typing import Callable
 from mathutils import Quaternion, Vector
 
 from .animation import (
-    FORWARD, SIDES, UP, Curve, FootGeometry, Pose, Skeleton, WalkCycle, aligning_rotation, bend,
+    DEFAULT_LEG_RADII, FORWARD, SIDES, UP, Curve, FootGeometry, Pose, Skeleton, WalkCycle, aligning_rotation, bend,
     curl_fingers, degrees, follow_skirt, forward_kinematics, hang, idle_breathing, lerp, mirrored_degrees, palm_normal,
     place_leg, reach_arm, set_world_rotation, share_twist, side_sign, sit_pose, smoothstep, world_point,
 )
@@ -76,6 +76,8 @@ class Stance:
     # Resting wrist on the thigh: fraction along the thigh, then (inward, forward, up) metres.
     lap_fraction: float = 0.52
     lap_offset: Vector = field(default_factory=lambda: Vector((0.012, 0.0, 0.088)))
+    # Leg thickness the skirt keeps clear of: thigh radius at its top and at the knee, and the bent knee's radius.
+    leg_radii: tuple = DEFAULT_LEG_RADII
 
 
 @dataclass
@@ -268,7 +270,7 @@ def compose(rig: CharacterRig, spec: BodySpec) -> Pose:
         seated = spec.seated
     else:
         seated = 0.0 if spec.gait is not None else rig.seated_factor(spec.hips_offset.z)
-    follow_skirt(skeleton, pose, spec.skirt_sway, seated)
+    follow_skirt(skeleton, pose, spec.skirt_sway, seated, rig.stance.leg_radii)
     return pose
 
 

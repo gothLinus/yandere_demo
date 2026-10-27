@@ -14,9 +14,10 @@ BLENDER_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 if BLENDER_DIRECTORY not in sys.path:
     sys.path.insert(0, BLENDER_DIRECTORY)
 
+from lib import astolfo  # noqa: E402
 from lib.rig import (  # noqa: E402
     AHOGE_BONES, BRAID_BONES, HAIR_FRONT_BONES, HAIR_SIDE_BONES, HUMANOID_BONES, NECKERCHIEF_BONES, PONYTAIL_BONES,
-    SECONDARY_BONES, SKIRT_BONES, SLEEVE_BONES,
+    SKIRT_BONES, SLEEVE_BONES,
 )
 from lib.validate import validate_cast_extras, validate_character, validate_target_extras  # noqa: E402
 
@@ -26,9 +27,12 @@ FACE_SHAPE_KEYS = [
     "smile", "sad", "blush", "wink_L", "wink_R", "mouth_A", "mouth_I", "mouth_U", "mouth_E", "mouth_O",
     "pupil_small", "pupil_large",
 ]
-TARGET_MESHES = ["Body", "Face", "Eyes", "Lashes", "Hair", "Braid", "Top", "Neckerchief", "Skirt", "Socks", "Shoes",
-                 "Accessories", "Blush"]
-TARGET_PLEAT_COUNT = 20
+# The Astolfo model's own mesh split (Task 23a).
+TARGET_MESHES = list(astolfo.MESH_PARTS.values())
+# Every humanoid bone, every renamed model bone (helpers, hair, bows, ribbons) and the added skirt chains.
+TARGET_BONES = sorted(set(HUMANOID_BONES) | set(astolfo.bone_rename_map().values()) | set(SKIRT_BONES))
+TARGET_HEIGHT = astolfo.CROWN_HEIGHT
+TARGET_TRIANGLE_BUDGET = 100000
 # Standing clips whose every frame must keep the thighs inside the skirt (full walk stride included).
 SKIRT_CLEAR_ACTIONS = ["target_walk_routine", "target_idle", "target_idle_shy", "target_idle_playful", "target_idle_confident"]
 # Standing clips whose braid and bow must rest on the skirt in every frame. Seated clips are left out: the bow lies
@@ -97,10 +101,11 @@ CHECKS = {
         "prefix": "Target",
         "shape_keys": FACE_SHAPE_KEYS,
         "actions": TARGET_ACTIONS,
-        "bones": HUMANOID_BONES + SECONDARY_BONES,
+        "bones": TARGET_BONES,
         "meshes": TARGET_MESHES,
         "target_extras": {
-            "pleat_count": TARGET_PLEAT_COUNT,
+            "height": TARGET_HEIGHT,
+            "triangle_budget": TARGET_TRIANGLE_BUDGET,
             "skirt_clear_actions": SKIRT_CLEAR_ACTIONS,
             "braid_clear_actions": BRAID_CLEAR_ACTIONS,
         },
@@ -192,7 +197,9 @@ def run_check(check_name: str) -> list[str]:
                                 check.get("proxy"))
     if "target_extras" in check:
         extras = check["target_extras"]
-        errors += validate_target_extras(check["prefix"], check["shape_keys"], extras["pleat_count"],
+        braid = astolfo.braid_layout(bpy.data.objects[f"{check['prefix']}Char"])
+        errors += validate_target_extras(check["prefix"], extras["height"], extras["triangle_budget"], check["bones"],
+                                         braid.resting_bones + braid.bow_bones, braid.meshes,
                                          extras["skirt_clear_actions"], extras["braid_clear_actions"])
     if "cast_extras" in check:
         errors += validate_cast_extras(check["prefix"], check["shape_keys"], **check["cast_extras"])

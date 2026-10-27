@@ -2,6 +2,11 @@ extends TestCase
 
 const TARGET_SCENE_PATH: String = "res://assets/models/target.glb"
 const REQUIRED_BONES: Array[String] = ["head", "hand.R", "index_03.L", "braid_01", "skirt_07_03"]
+# The model's own bones kept under project names: deformation helpers (no springs), the neckerchief ribbons, the
+# head bows and the braid bow.
+const MODEL_BONES: Array[String] = [
+	"chest_helper.L", "glute_helper.R", "wrist_helper.L", "ribbon_L_02", "head_bow_R_01", "braid_bow_01",
+]
 # Every expression ExpressionController drives, baked from the model's flexes onto the face mesh.
 const REQUIRED_BLEND_SHAPES: Array[String] = [
 	"neutral", "startled", "suspicious", "happy", "blink", "smile", "sad", "blush", "wink_L", "wink_R",
@@ -60,11 +65,18 @@ func test_target_glb_structure() -> void:
 	if not skeletons.is_empty():
 		var skeleton: Skeleton3D = skeletons[0] as Skeleton3D
 		assert_eq(String(skeleton.get_parent().name), "TargetChar", "the skeleton sits under the TargetChar armature root")
-		for bone_name: String in REQUIRED_BONES:
+		for bone_name: String in REQUIRED_BONES + MODEL_BONES:
 			assert_true(skeleton.find_bone(bone_name) >= 0, "bone %s exists" % bone_name)
 
 	for mesh_name: String in REQUIRED_MESHES:
 		assert_true(root.find_child(mesh_name, true, false) is MeshInstance3D, "mesh %s exists" % mesh_name)
+	var mesh_names: Array[String] = []
+	for node: Node in root.find_children("*", "MeshInstance3D", true, false):
+		mesh_names.append(String(node.name))
+	mesh_names.sort()
+	var expected_meshes: Array[String] = REQUIRED_MESHES.duplicate()
+	expected_meshes.sort()
+	assert_eq(mesh_names, expected_meshes, "the meshes are the model's own split")
 
 	var face: MeshInstance3D = root.find_child(FACE_MESH, true, false) as MeshInstance3D
 	if face != null:

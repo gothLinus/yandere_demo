@@ -473,7 +473,8 @@ SEATED_BACK_HANG = 12.0
 SEATED_BACK_TUCK = 70.0
 
 
-def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seated: float | None = None) -> None:
+def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seated: float | None = None,
+                 leg_radii: tuple | None = None) -> None:
     """Swing every skirt chain with the thighs so the hem rides over the legs instead of through them.
 
     Chains are found by the `skirt_` prefix, so any number of chains with any number of segments works.
@@ -482,7 +483,7 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
     swing, side panels their own thigh's lift and spread. `sway_degrees` swings every hem toward +X.
     The root segment takes the main swing; the remaining segments share the follow-through (hem droop,
     seated drape). `seated` (0..1) drapes the skirt over the lap; by default it is derived from the
-    thigh lift.
+    thigh lift. `leg_radii` (thigh top, thigh at the knee, knee) sizes the legs the skirt keeps clear of.
     """
     chains = skeleton.chains(SKIRT_PREFIX)
     if not chains:
@@ -537,7 +538,7 @@ def follow_skirt(skeleton: Skeleton, pose: Pose, sway_degrees: float = 0.0, seat
             follow_scale = (1.0 - 0.35 * seated * share["back"]) ** (1.0 / max(1, segments))
             for bone in chain[1:]:
                 pose.scales[bone] = Vector((1.0, follow_scale, 1.0))
-    clear_legs(skeleton, pose, chains)
+    clear_legs(skeleton, pose, chains, leg_radii or DEFAULT_LEG_RADII)
 
 
 # Leg capsules the skirt keeps clear of: radius at the hip, at the knee, and how far down the shin the knee cap
@@ -547,6 +548,7 @@ THIGH_START = 0.2
 # A bent knee juts out (kneecap and the skin bulge over the joint) past the straight-leg thigh radius.
 KNEE_RADIUS = 0.062
 SHIN_REACH = 0.25
+DEFAULT_LEG_RADII = (THIGH_RADII[0], THIGH_RADII[1], KNEE_RADIUS)
 SKIRT_LEG_MARGIN = 0.012
 # Each chain carries the fabric halfway to its neighbours, so it checks that whole sector.
 SKIRT_SECTOR_SHARES = (0.0, 0.25, 0.5)
@@ -554,16 +556,17 @@ MAX_CLEARANCE_DEGREES = 80.0
 SKIRT_SMOOTHING_PASSES = 3
 
 
-def _leg_capsules(skeleton: Skeleton, world: dict, heads: dict) -> list:
+def _leg_capsules(skeleton: Skeleton, world: dict, heads: dict, leg_radii: tuple) -> list:
+    thigh_top, thigh_bottom, knee_radius = leg_radii
     capsules = []
     for side in SIDES:
         hip = heads[f"thigh{side}"]
         knee = heads[f"shin{side}"]
         ankle = heads[f"foot{side}"]
         # The top of the thigh sits inside the pelvis, under the waistband the chains pivot on.
-        capsules.append((hip.lerp(knee, THIGH_START), knee, THIGH_RADII[0], THIGH_RADII[1]))
-        capsules.append((knee, knee, KNEE_RADIUS, KNEE_RADIUS))
-        capsules.append((knee, knee.lerp(ankle, SHIN_REACH), THIGH_RADII[1], THIGH_RADII[1] * 0.9))
+        capsules.append((hip.lerp(knee, THIGH_START), knee, thigh_top, thigh_bottom))
+        capsules.append((knee, knee, knee_radius, knee_radius))
+        capsules.append((knee, knee.lerp(ankle, SHIN_REACH), thigh_bottom, thigh_bottom * 0.9))
     return capsules
 
 
@@ -598,31 +601,35 @@ def _sector_pairs(skeleton: Skeleton, world: dict, heads: dict, chains: list, in
     return pairs
 
 
-def _sector_clearance(pairs: list, pivot: Vector, turn: Quaternion, capsules: list) -> float:
+def _sector_clearance(pairs: list, pivot: Vector, turn: Quaternion, capsules: list, allowances: list | None = None) -> float:
+    """Smallest clearance of the sector's samples from the legs, each less the clearance it may keep (`allowances`)."""
     worst = math.inf
-    for point, other, share in pairs:
+    for sample_index, (point, other, share) in enumerate(pairs):
         moved = pivot + turn @ (point - pivot)
         sample = moved.lerp(other, share)
+        allowance = allowances[sample_index] if allowances is not None else 0.0
         for capsule in capsules:
-            worst = min(worst, _capsule_clearance(sample, capsule))
+            worst = min(worst, _capsule_clearance(sample, capsule) - allowance)
     return worst
 
 
-def _rest_clearances(skeleton: Skeleton, chains: list) -> dict:
-    key = ("rest_clearance", tuple(chain[0] for chain in chains))
+def _rest_allowances(skeleton: Skeleton, chains: list, leg_radii: tuple) -> dict:
+    """Per chain, the clearance each sector sample must keep: the margin, or less where it hangs closer at rest."""
+    key = ("rest_allowances", tuple(chain[0] for chain in chains), leg_radii)
     if key not in skeleton._chains:
         world, heads = forward_kinematics(skeleton, Pose())
-        capsules = _leg_capsules(skeleton, world, heads)
-        skeleton._chains[key] = {
-            chain[0]: _sector_clearance(_sector_pairs(skeleton, world, heads, chains, index), heads[chain[0]],
-                                        Quaternion(), capsules)
-            for index, chain in enumerate(chains)
-        }
+        capsules = _leg_capsules(skeleton, world, heads, leg_radii)
+        allowances = {}
+        for index, chain in enumerate(chains):
+            pairs = _sector_pairs(skeleton, world, heads, chains, index)
+            allowances[chain[0]] = [min(SKIRT_LEG_MARGIN, _sector_clearance([pair], heads[chain[0]], Quaternion(), capsules))
+                                    for pair in pairs]
+        skeleton._chains[key] = allowances
     return skeleton._chains[key]
 
 
 def _drape_segments(skeleton: Skeleton, pose: Pose, chains: list, index: int, axis: Vector, lifted: float,
-                    margin: float, capsules: list) -> None:
+                    allowances: list, capsules: list) -> None:
     """After the root lifted a chain by `lifted` degrees, let each lower segment fall back toward hanging as far
     as the legs allow, so the fabric drapes over a thigh and down its side instead of sticking out like a shelf."""
     chain = chains[index]
@@ -631,21 +638,23 @@ def _drape_segments(skeleton: Skeleton, pose: Pose, chains: list, index: int, ax
         world, heads = forward_kinematics(skeleton, pose)
         bone = chain[segment_index]
         pivot = heads[bone]
-        pairs = [pair for pair in _sector_pairs(skeleton, world, heads, chains, index)
-                 if (pair[0] - heads[chain[0]]).length >= (pivot - heads[chain[0]]).length - 1e-6]
+        kept = [(pair, allowance) for pair, allowance in zip(_sector_pairs(skeleton, world, heads, chains, index), allowances)
+                if (pair[0] - heads[chain[0]]).length >= (pivot - heads[chain[0]]).length - 1e-6]
+        pairs = [pair for pair, _ in kept]
+        kept_allowances = [allowance for _, allowance in kept]
 
         def clearance(angle: float) -> float:
-            return _sector_clearance(pairs, pivot, Quaternion(axis, math.radians(-angle)), capsules)
+            return _sector_clearance(pairs, pivot, Quaternion(axis, math.radians(-angle)), capsules, kept_allowances)
 
-        if remaining <= 0.0 or clearance(0.0) < margin:
+        if remaining <= 0.0 or clearance(0.0) < 0.0:
             break
         low, high = 0.0, remaining
-        if clearance(high) >= margin:
+        if clearance(high) >= 0.0:
             low = high
         else:
             for _ in range(12):
                 middle = 0.5 * (low + high)
-                if clearance(middle) >= margin:
+                if clearance(middle) >= 0.0:
                     low = middle
                 else:
                     high = middle
@@ -655,22 +664,22 @@ def _drape_segments(skeleton: Skeleton, pose: Pose, chains: list, index: int, ax
         remaining -= low
 
 
-def clear_legs(skeleton: Skeleton, pose: Pose, chains: list) -> None:
+def clear_legs(skeleton: Skeleton, pose: Pose, chains: list, leg_radii: tuple = DEFAULT_LEG_RADII) -> None:
     """Swing each skirt chain outward just far enough that its whole sector stays outside the legs.
 
     This bakes into the keys what the spring-bone colliders do at runtime: a striding or raised thigh lifts the
-    panels in front of it instead of pushing through them. Chains that already clear are left untouched.
+    panels in front of it instead of pushing through them. Chains that already clear are left untouched. Each
+    sample of a sector keeps SKIRT_LEG_MARGIN, or the smaller clearance it has hanging at rest.
     """
-    rest_clearance = _rest_clearances(skeleton, chains)
+    rest_allowances = _rest_allowances(skeleton, chains, leg_radii)
     world, heads = forward_kinematics(skeleton, pose)
-    capsules = _leg_capsules(skeleton, world, heads)
+    capsules = _leg_capsules(skeleton, world, heads, leg_radii)
     up = world["hips"] @ UP
     center = heads["hips"]
     for index, chain in enumerate(chains):
         pivot = heads[chain[0]]
         pairs = _sector_pairs(skeleton, world, heads, chains, index)
-        # The fabric only has to keep the clearance it has hanging at rest.
-        margin = min(SKIRT_LEG_MARGIN, rest_clearance[chain[0]])
+        allowances = rest_allowances[chain[0]]
         hem = tail_position(skeleton, world, heads, chain[-1]) - center
         outward = hem - up * hem.dot(up)
         if outward.length < 1e-6:
@@ -678,24 +687,24 @@ def clear_legs(skeleton: Skeleton, pose: Pose, chains: list) -> None:
         axis = outward.normalized().cross(up)
 
         def worst(angle: float) -> float:
-            return _sector_clearance(pairs, pivot, Quaternion(axis, math.radians(angle)), capsules)
+            return _sector_clearance(pairs, pivot, Quaternion(axis, math.radians(angle)), capsules, allowances)
 
-        if worst(0.0) >= margin:
+        if worst(0.0) >= 0.0:
             continue
         low, high = 0.0, MAX_CLEARANCE_DEGREES
-        if worst(high) < margin:
+        if worst(high) < 0.0:
             low = high
         else:
             for _ in range(14):
                 middle = 0.5 * (low + high)
-                if worst(middle) >= margin:
+                if worst(middle) >= 0.0:
                     high = middle
                 else:
                     low = middle
             low = high
         set_world_rotation(skeleton, pose, chain[0], Quaternion(axis, math.radians(low)) @ world[chain[0]])
         world, heads = forward_kinematics(skeleton, pose)
-        _drape_segments(skeleton, pose, chains, index, axis, low, margin, capsules)
+        _drape_segments(skeleton, pose, chains, index, axis, low, allowances, capsules)
         world, heads = forward_kinematics(skeleton, pose)
 
 

@@ -40,7 +40,7 @@ def rig_feet(rig: CharacterRig, offsets: dict) -> dict:
 
 
 def target_stance(rest_ankles: dict, mouth: Vector, hanging_bones: tuple, seat_clearance: float, heel_back: float,
-                  lap_offset: Vector) -> Stance:
+                  lap_offset: Vector, leg_radii: tuple) -> Stance:
     """The target's idle and seated acting; every landmark argument is measured on the model."""
     return Stance(
         idle_feet=rest_relative_feet(rest_ankles, IDLE_FEET),
@@ -55,6 +55,7 @@ def target_stance(rest_ankles: dict, mouth: Vector, hanging_bones: tuple, seat_c
         seat_clearance=seat_clearance,
         heel_back=heel_back,
         lap_offset=lap_offset,
+        leg_radii=leg_radii,
         mouth=mouth,
         hanging_bones=hanging_bones,
     )

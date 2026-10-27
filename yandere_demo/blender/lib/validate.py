@@ -146,25 +146,38 @@ def _is_identity(matrix) -> bool:
     return True
 
 
-HEAD_RATIO_RANGE = (6.5, 7.0)
 TINT_MATERIAL_NAME = "M_UniformTint"
+# The target's skirt is short, so 10 % of it is a thin band. Its hem edge is the striped band and the pleat break above
+# it (6 cm): thigh skin there shows under a swinging hem, not through the fabric.
+TARGET_HEM_BAND = 0.06
 HEIGHT_TOLERANCE = 0.005
-SHOULDER_TO_HIP_LIMIT = 1.05
-TORSO_GROUPS = {"hips", "spine", "thigh.L", "thigh.R"}
-ZERO_AREA = 1e-10
 
 
-def validate_target_extras(prefix: str, shape_keys: list[str], pleat_count: int,
-                           skirt_clear_actions: list[str] | None = None,
+def validate_target_extras(prefix: str, height: float, triangle_budget: int, required_bones: list[str],
+                           braid_bones: tuple, braid_meshes: tuple, skirt_clear_actions: list[str] | None = None,
                            braid_clear_actions: list[str] | None = None) -> list[str]:
-    """Checks for the 4.1b target: shape keys on the split face meshes, the hidden blush, the pleat count,
-    skinned fingers, the femboy silhouette, no leg poking through the skirt in `skirt_clear_actions`, and no
-    braid or bow sinking into the skirt in `braid_clear_actions`."""
+    """Checks for the Astolfo target (Task 23a): the crown height, the triangle budget, the model's own bones, skinned
+    fingers, no leg poking through the skirt in `skirt_clear_actions`, and no braid or bow (`braid_bones` on
+    `braid_meshes`) sinking into the skirt in `braid_clear_actions`."""
     errors: list[str] = []
+    armature = bpy.data.objects.get(f"{prefix}Char")
+    if armature is None:
+        return [f"armature {prefix}Char is missing"]
+    crown = (armature.matrix_world @ armature.data.bones["head"].tail_local).z
+    if abs(crown - height) > HEIGHT_TOLERANCE:
+        errors.append(f"{armature.name} is {crown:.3f} m tall, expected {height:.3f} m")
+    triangles = visible_triangles(armature, [])
+    if triangles > triangle_budget:
+        errors.append(f"{armature.name} shows {triangles} triangles, over the budget of {triangle_budget}")
+    bone_names = {bone.name for bone in armature.data.bones}
+    for bone_name in required_bones:
+        if bone_name not in bone_names:
+            errors.append(f"bone {bone_name} is missing from {armature.name}")
     for action_name in braid_clear_actions or []:
         if bpy.data.actions.get(action_name) is None:
             continue
-        sunk = [(frame, count, depth) for frame, count, depth in braid_skirt_penetrations(prefix, action_name) if count]
+        sunk = [(frame, count, depth) for frame, count, depth
+                in braid_skirt_penetrations(prefix, action_name, braid_bones, braid_meshes) if count]
         if sunk:
             frame, count, depth = max(sunk, key=lambda item: item[2])
             errors.append(f"{action_name}: the braid or its bow sinks into the skirt in {len(sunk)} frames "
@@ -172,25 +185,18 @@ def validate_target_extras(prefix: str, shape_keys: list[str], pleat_count: int,
     for action_name in skirt_clear_actions or []:
         if bpy.data.actions.get(action_name) is None:
             continue
-        pokes = [(frame, count, depth) for frame, count, depth in skirt_penetrations(prefix, action_name) if count]
+        pokes = [(frame, count, depth) for frame, count, depth
+                 in skirt_penetrations(prefix, action_name, TARGET_HEM_BAND) if count]
         if pokes:
             frame, count, depth = max(pokes, key=lambda item: item[2])
             errors.append(f"{action_name}: legs poke through the skirt in {len(pokes)} frames "
                           f"(worst frame {frame}: {count} vertices, {depth * 1000:.1f} mm)")
-    for part in ("Eyes", "Lashes"):
-        errors.extend(_validate_shape_keys(f"{prefix}{part}", shape_keys))
-    errors.extend(_validate_shape_keys(f"{prefix}Blush", ["blush"]))
-    errors.extend(_validate_blush_hidden(f"{prefix}Blush"))
-    skirt = bpy.data.objects.get(f"{prefix}Skirt")
-    if skirt is not None and skirt.get("pleat_count") != pleat_count:
-        errors.append(f"{skirt.name} pleat_count is {skirt.get('pleat_count')}, expected {pleat_count}")
     body = bpy.data.objects.get(f"{prefix}Body")
     if body is not None:
         group_names = {group.name for group in body.vertex_groups}
         for finger_tip in ("thumb_03.L", "index_03.L", "pinky_03.R"):
             if finger_tip not in group_names:
                 errors.append(f"{body.name} has no weights for {finger_tip}")
-        errors.extend(_validate_silhouette(prefix, body))
     return errors
 
 
@@ -278,50 +284,6 @@ def _validate_shape_keys(object_name: str, required: list[str]) -> list[str]:
     return []
 
 
-def _validate_blush_hidden(object_name: str) -> list[str]:
-    """At blush = 0 every blush polygon must have zero area, so nothing renders."""
-    blush = bpy.data.objects.get(object_name)
-    if blush is None or blush.data.shape_keys is None:
-        return []
-    basis = blush.data.shape_keys.key_blocks["Basis"].data
-    for polygon in blush.data.polygons:
-        corners = [basis[index].co for index in polygon.vertices]
-        area = sum(((corners[index] - corners[0]).cross(corners[index + 1] - corners[0])).length
-                   for index in range(1, len(corners) - 1))
-        if area > ZERO_AREA:
-            return [f"{object_name} is visible with blush at 0 (polygon {polygon.index} has area {area:.2e})"]
-    return []
-
-
-def _validate_silhouette(prefix: str, body) -> list[str]:
-    errors: list[str] = []
-    armature = body.parent
-    names = {group.index: group.name for group in body.vertex_groups}
-    upper_arm = armature.matrix_world @ armature.data.bones["upper_arm.L"].head_local
-    hips = armature.matrix_world @ armature.data.bones["hips"].head_local
-    shoulder_half = 0.0
-    hip_half = 0.0
-    for vertex in body.data.vertices:
-        point = body.matrix_world @ vertex.co
-        if abs(point.z - upper_arm.z) < 0.01:
-            shoulder_half = max(shoulder_half, abs(point.x))
-        dominant = max(vertex.groups, key=lambda element: element.weight, default=None)
-        if dominant is not None and names[dominant.group] in TORSO_GROUPS and hips.z - 0.14 < point.z < hips.z + 0.02:
-            hip_half = max(hip_half, abs(point.x))
-    if hip_half <= 0.0 or shoulder_half > hip_half * SHOULDER_TO_HIP_LIMIT:
-        errors.append(f"shoulder width {2 * shoulder_half:.3f} m exceeds {SHOULDER_TO_HIP_LIMIT} x hip width {2 * hip_half:.3f} m")
-    face = bpy.data.objects.get(f"{prefix}Face")
-    if face is not None and "head" in face.vertex_groups:
-        head_group = face.vertex_groups["head"].index
-        heights = [(face.matrix_world @ vertex.co).z for vertex in face.data.vertices
-                   if any(element.group == head_group for element in vertex.groups)]
-        crown = max(heights)
-        ratio = (armature.matrix_world @ armature.data.bones["head"].tail_local).z / (crown - min(heights))
-        if not HEAD_RATIO_RANGE[0] <= ratio <= HEAD_RATIO_RANGE[1]:
-            errors.append(f"head-to-height ratio is 1:{ratio:.2f}, expected 1:{HEAD_RATIO_RANGE[0]}-{HEAD_RATIO_RANGE[1]}")
-    return errors
-
-
 SKIRT_PENETRATION_TOLERANCE = 0.003
 # Skirt faces this close to the hem (rest pose, fraction of the skirt length) count as the hem edge, where legs
 # legitimately show below the fabric.
@@ -332,12 +294,13 @@ SKIRT_POKE_RANGE = 0.04
 SKIRT_OPENING_SLOPE = 0.6
 
 
-def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, float]]:
+def skirt_penetrations(prefix: str, action_name: str, hem_band: float = 0.0) -> list[tuple[int, int, float]]:
     """(frame, leg vertices poking out through the skirt, deepest poke in metres) for every frame of an action.
 
     A thigh or knee vertex pokes through when no skirt lies further out along the ray from its leg bone through
     it, while the nearest
-    skirt face is above the hem edge (so a leg simply showing below the hem does not count).
+    skirt face is above the hem edge (so a leg simply showing below the hem does not count). The hem edge is the
+    lowest SKIRT_HEM_FRACTION of the skirt, and at least `hem_band` metres.
     """
     armature = bpy.data.objects[f"{prefix}Char"]
     skirt = bpy.data.objects[f"{prefix}Skirt"]
@@ -345,7 +308,7 @@ def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, fl
     action = bpy.data.actions[action_name]
     rest_z = [polygon.center.z for polygon in skirt.data.polygons]
     top, bottom = max(rest_z), min(rest_z)
-    interior = [(top - z) / (top - bottom) < SKIRT_HEM_FRACTION for z in rest_z]
+    interior = [(top - z) / (top - bottom) < SKIRT_HEM_FRACTION and z - bottom > hem_band for z in rest_z]
     leg_vertices = {}
     for leg in legs:
         names = {group.index: group.name for group in leg.vertex_groups}
@@ -404,28 +367,27 @@ def skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, fl
     return results
 
 
-# Braid bones whose hair hangs at skirt height, plus the bow on its tip.
-BRAID_SKIRT_BONES = ("braid_07", "braid_08", "braid_09", "braid_10", "braid_bow")
 BRAID_SKIRT_TOLERANCE = 0.001
 BRAID_SKIRT_RANGE = 0.08
 
 
-def braid_skirt_penetrations(prefix: str, action_name: str) -> list[tuple[int, int, float]]:
-    """(frame, braid and bow vertices hidden inside the skirt, deepest in metres) for every frame of a standing action.
+def braid_skirt_penetrations(prefix: str, action_name: str, bones: tuple, meshes: tuple) -> list[tuple[int, int, float]]:
+    """(frame, vertices of `bones` on `meshes` hidden inside the skirt, deepest in metres) for every frame of a standing
+    action.
 
     A vertex is inside when a ray from it, pointing away from the hips' vertical axis, still meets the skirt: the
     fabric then lies further out than the bow or braid at that height.
     """
     armature = bpy.data.objects[f"{prefix}Char"]
     skirt = bpy.data.objects[f"{prefix}Skirt"]
-    sources = [bpy.data.objects[f"{prefix}{part}"] for part in ("Braid", "Accessories")]
+    sources = [bpy.data.objects[name] for name in meshes]
     action = bpy.data.actions[action_name]
     vertex_lists = {}
     for source in sources:
         names = {group.index: group.name for group in source.vertex_groups}
         vertex_lists[source.name] = [vertex.index for vertex in source.data.vertices
                                      if (dominant := max(vertex.groups, key=lambda element: element.weight, default=None))
-                                     and names[dominant.group] in BRAID_SKIRT_BONES]
+                                     and names[dominant.group] in bones]
     animation_data = armature.animation_data_create()
     previous_action = animation_data.action
     animation_data.action = action

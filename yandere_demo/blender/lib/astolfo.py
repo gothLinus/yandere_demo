@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import bpy
 import numpy
 from mathutils import Matrix, Vector
+from mathutils.kdtree import KDTree
 
 from . import body, clothing, mesh_utils, pleats, target_animations
 from .animation import SIDES, side_sign
@@ -35,6 +36,8 @@ TORSO_BONES = {
     "Neck1": "neck", "Head1": "head",
 }
 MERGED_BONES = {f"{VALVE_PREFIX}Spine1", f"{VALVE_PREFIX}Spine4"}
+# The model has a shoulder helper on the left arm only.
+ABSENT_SOURCE_BONES = {f"{VALVE_PREFIX}R_Shoulder"}
 LIMB_BONES = {
     "Clavicle": "shoulder", "UpperArm": "upper_arm", "Forearm": "forearm", "Hand": "hand",
     "Thigh": "thigh", "Calf": "shin", "Foot": "foot", "Toe0": "toe",
@@ -125,6 +128,7 @@ LANDMARK_MOVE_FRACTION = 0.5
 SKIRT_CHAIN_INSET = 0.004
 SKIRT_SAMPLE_DEGREES = 12.0
 SKIRT_SAMPLE_HEIGHT = 0.02
+SKIRT_SEAM_DISTANCE = 0.015
 COLLISION_PROXY = f"{PREFIX}-col"
 PROXY_RADIUS_STEP = 0.01
 PROXY_BONE_PREFIXES = ("hips", "spine", "chest", "thigh", "shin", "glute", "skirt_")
@@ -149,7 +153,7 @@ def bone_rename_map() -> dict[str, str]:
                 suffix = str(segment) if segment else ""
                 renames[f"{VALVE_PREFIX}{source_side}Finger{finger_index}{suffix}"] = f"{finger}_{segment + 1:02d}{side}"
     renames.update(SECONDARY_BONES)
-    return renames
+    return {source: target for source, target in renames.items() if source not in ABSENT_SOURCE_BONES}
 
 
 def load_source(blend_path: str) -> tuple:
@@ -357,8 +361,11 @@ def _lower_arms(armature, meshes: dict) -> None:
     with _EditMode(armature):
         for side in SIDES:
             upper_arm = armature.data.edit_bones[f"upper_arm{side}"]
-            for edit_bone in [upper_arm] + list(upper_arm.children_recursive):
-                edit_bone.transform(rotations[side])
+            arm_bones = [upper_arm] + list(upper_arm.children_recursive)
+            # Connected heads follow their parents' tails, so every new joint is taken from the old pose first.
+            moved = [(edit_bone, rotations[side] @ edit_bone.head, rotations[side] @ edit_bone.tail) for edit_bone in arm_bones]
+            for edit_bone, head, tail in moved:
+                edit_bone.head, edit_bone.tail, edit_bone.roll = head, tail, 0.0
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -414,14 +421,53 @@ def add_skirt_chains(armature, skirt) -> None:
 
 
 def _weight_skirt(skirt, frame: SkirtFrame) -> None:
-    """The hips hold the waistband; below it azimuth blends the two nearest chains and height their segments."""
+    """The hips hold the waistband; below it azimuth blends the two nearest chains and height their segments.
+
+    Open pleat edges that overlap at rest share one averaged weighting, so swinging chains never pull them apart.
+    """
+    weights = [_skirt_weights(Vector(point), frame) for point in frame.points]
+    for cluster in _overlapping_edge_vertices(skirt):
+        shared: dict = {}
+        for index in cluster:
+            for name, weight in weights[index].items():
+                shared[name] = shared.get(name, 0.0) + weight / len(cluster)
+        for index in cluster:
+            weights[index] = shared
     skirt.vertex_groups.clear()
     groups = {}
-    for vertex, point in zip(skirt.data.vertices, frame.points):
-        for name, weight in _skirt_weights(Vector(point), frame).items():
+    for vertex_index, vertex_weights in enumerate(weights):
+        for name, weight in vertex_weights.items():
             if name not in groups:
                 groups[name] = skirt.vertex_groups.new(name=name)
-            groups[name].add([vertex.index], weight, "REPLACE")
+            groups[name].add([vertex_index], weight, "REPLACE")
+
+
+def _overlapping_edge_vertices(skirt) -> list:
+    """Groups of open-edge vertices lying within SKIRT_SEAM_DISTANCE of each other (both sides of a pleat overlap)."""
+    edge_counts: dict = {}
+    for polygon in skirt.data.polygons:
+        for key in polygon.edge_keys:
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+    open_vertices = sorted({index for key, count in edge_counts.items() if count == 1 for index in key})
+    tree = KDTree(len(open_vertices))
+    for index in open_vertices:
+        tree.insert(skirt.data.vertices[index].co, index)
+    tree.balance()
+    parents = {index: index for index in open_vertices}
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    for index in open_vertices:
+        for _, other, _ in tree.find_range(skirt.data.vertices[index].co, SKIRT_SEAM_DISTANCE):
+            parents[root(other)] = root(index)
+    clusters: dict = {}
+    for index in open_vertices:
+        clusters.setdefault(root(index), []).append(index)
+    return [cluster for cluster in clusters.values() if len(cluster) > 1]
 
 
 def _skirt_weights(point: Vector, frame: SkirtFrame) -> dict:
@@ -520,7 +566,7 @@ def measure_stance(armature, meshes: dict, landmarks: FaceLandmarks) -> Stance:
     hanging = tuple(name for name in braid_layout(armature).bones if bones[name].head_local.z < chest_z)
     return target_animations.target_stance(
         rest_ankles, landmarks.mouth, hanging, _seat_clearance(armature, meshes), _heel_back(meshes["Shoes"], rest_ankles),
-        _lap_offset(armature, meshes))
+        _lap_offset(armature, meshes), _leg_radii(armature, meshes))
 
 
 SEATED_SKIN_BONES = ("hips", "thigh", "glute_helper")
@@ -583,6 +629,167 @@ def _lap_offset(armature, meshes: dict) -> Vector:
                     and abs((point - lap).dot(axis)) < LAP_SAMPLE_LENGTH):
                 front = max(front, lap.y - point.y)
     return Vector((LAP_INWARD, 0.0, front + LAP_HAND_CLEARANCE))
+
+
+# Rings of the thigh (fractions along hip to knee) whose forward reach sizes the skirt's leg capsules, and how far
+# from the knee joint its skin counts as the knee.
+THIGH_TOP_RING = (0.15, 0.4)
+THIGH_BOTTOM_RING = (0.85, 0.95)
+KNEE_REACH = 0.04
+
+
+def _leg_radii(armature, meshes: dict) -> tuple:
+    """(thigh radius at its top, thigh radius at the knee, knee radius) of the left leg's skin, measured forward.
+
+    A stride pushes the front of the thigh into the skirt, and a capsule as wide as the thigh's widest ring would
+    already stand out of the hanging skirt at rest.
+    """
+    bones = armature.data.bones
+    hip = bones["thigh.L"].head_local
+    knee = bones["shin.L"].head_local
+    axis = knee - hip
+    forward = Vector((0.0, -1.0, 0.0))
+    top = bottom = knee_radius = 0.0
+    for mesh_object in (meshes["Body"], meshes["Socks"]):
+        names = {group.index: group.name for group in mesh_object.vertex_groups}
+        for vertex in mesh_object.data.vertices:
+            strongest = max(vertex.groups, key=lambda element: element.weight, default=None)
+            if strongest is None or names[strongest.group] not in ("thigh.L", "shin.L"):
+                continue
+            point = mesh_object.matrix_world @ vertex.co
+            fraction = (point - hip).dot(axis) / axis.length_squared
+            reach = (point - (hip + axis * fraction)).dot(forward)
+            if (point - knee).length < KNEE_REACH:
+                knee_radius = max(knee_radius, (point - knee).dot(forward))
+            if names[strongest.group] != "thigh.L":
+                continue
+            if THIGH_TOP_RING[0] <= fraction <= THIGH_TOP_RING[1]:
+                top = max(top, reach)
+            elif THIGH_BOTTOM_RING[0] <= fraction <= THIGH_BOTTOM_RING[1]:
+                bottom = max(bottom, reach)
+    return top, bottom, knee_radius
+
+
+# ---------------------------------------------------------------------------------------------------
+# Spring chains (data/secondary_motion.tres)
+
+# Family -> (chain bone prefixes, joint radius, collider bones). The *_helper bones are never in a family.
+SPRING_FAMILIES = {
+    "braid": (("braid_0",), 0.03, ("chest", "hips")),
+    "hair_front": (("hair_front_",), 0.015, ("head",)),
+    "hair_side": (("hair_side_",), 0.02, ("head",)),
+    "hair_back": (("hair_back_",), 0.02, ("head",)),
+    "head_bow": (("head_bow_",), 0.015, ("head",)),
+    "ribbon": (("ribbon_",), 0.015, ("chest",)),
+    "skirt": (("skirt_",), 0.025, ("thigh.L", "thigh.R", "hips")),
+    "braid_bow": ((BRAID_BOW_PREFIX,), 0.02, ("hips", "thigh.L", "thigh.R")),
+}
+# Capsule radius wanted per collider bone; a capsule shrinks where a chain joint would start inside it.
+COLLIDER_RADII = {"thigh.L": 0.065, "thigh.R": 0.065, "hips": 0.12, "chest": 0.11, "head": 0.085}
+COLLIDER_SKIN_BONES = {"thigh.L": ("thigh.L",), "thigh.R": ("thigh.R",), "hips": ("hips", "glute_helper"),
+                       "chest": ("chest", "spine", "chest_helper"), "head": ("head",)}
+COLLIDER_CLEARANCE = 0.002
+
+
+def spring_chains(armature, prefixes: tuple) -> list:
+    """(root, end) of every chain whose bones start with one of `prefixes`: each root follows its first matching child."""
+    bones = armature.data.bones
+    chains = []
+    for bone in bones:
+        if not bone.name.startswith(prefixes) or (bone.parent is not None and bone.parent.name.startswith(prefixes)):
+            continue
+        end = bone
+        while True:
+            following = sorted((child for child in end.children if child.name.startswith(prefixes)), key=lambda child: child.name)
+            if not following:
+                break
+            end = following[0]
+        chains.append((bone.name, end.name))
+    return sorted(chains)
+
+
+def _chain_joints(armature, root: str, end: str) -> list:
+    """Rest positions of the simulated joints: the heads below the root and the end bone's tip."""
+    bones = armature.data.bones
+    joints = [bones[end].tail_local.copy()]
+    walker = bones[end]
+    while walker.name != root:
+        joints.append(walker.head_local.copy())
+        walker = walker.parent
+    return joints
+
+
+def fit_colliders(armature, meshes: dict) -> dict:
+    """Bone -> (radius, height, local centre): a capsule along the bone covering its skin, clear of every chain joint."""
+    joints_by_collider: dict = {}
+    for prefixes, joint_radius, colliders in SPRING_FAMILIES.values():
+        for root, end in spring_chains(armature, prefixes):
+            for collider in colliders:
+                joints_by_collider.setdefault(collider, []).extend(
+                    (joint, joint_radius) for joint in _chain_joints(armature, root, end))
+    fitted = {}
+    for bone_name, wanted_radius in COLLIDER_RADII.items():
+        to_local = armature.data.bones[bone_name].matrix_local.inverted()
+        skin = [to_local @ point for point in _skin_points(meshes, COLLIDER_SKIN_BONES[bone_name])]
+        joints = [(to_local @ joint, joint_radius) for joint, joint_radius in joints_by_collider.get(bone_name, [])]
+        fitted[bone_name] = max((_clear_capsule(start, end, wanted_radius, joints) for start, end in _capsule_candidates(skin)),
+                                key=lambda capsule: capsule[0] ** 2 * capsule[1])
+    return fitted
+
+
+def _capsule_candidates(skin: list) -> list:
+    """Axis segments along the bone: the whole skin's span, or a sphere at the middle of the skin, its upper or its
+    lower half (the head's cranium, the pelvis below a hugging waistband). The one covering the most volume wins."""
+    center = _box_center(skin)
+    middle = center.y
+    candidates = [(Vector((center.x, min(point.y for point in skin), center.z)),
+                   Vector((center.x, max(point.y for point in skin), center.z))), (center, center)]
+    for half in ([point for point in skin if point.y >= middle], [point for point in skin if point.y < middle]):
+        half_center = _box_center(half)
+        candidates.append((half_center, half_center))
+    return candidates
+
+
+def _box_center(points: list) -> Vector:
+    """Middle of the points' bounding box (dense detail such as the eyes would pull a mean off centre)."""
+    return Vector(tuple((min(point[axis] for point in points) + max(point[axis] for point in points)) * 0.5
+                        for axis in range(3)))
+
+
+def _clear_capsule(start: Vector, end: Vector, wanted_radius: float, joints: list) -> tuple:
+    """(radius, height, centre) of the capsule on `start`..`end`, shrunk until every chain joint is outside it."""
+    radius = wanted_radius
+    for local, joint_radius in joints:
+        radius = min(radius, (local - mesh_utils.closest_point_on_segment(local, start, end)).length
+                     - joint_radius - COLLIDER_CLEARANCE)
+    return radius, (end - start).length + 2.0 * radius, (start + end) * 0.5
+
+
+def _skin_points(meshes: dict, bone_names: tuple) -> list:
+    points = []
+    for mesh_object in (meshes["Body"], meshes["Face"]):
+        names = {group.index: group.name for group in mesh_object.vertex_groups}
+        for vertex in mesh_object.data.vertices:
+            strongest = max(vertex.groups, key=lambda element: element.weight, default=None)
+            if strongest is not None and names[strongest.group].startswith(bone_names):
+                points.append(mesh_object.matrix_world @ vertex.co)
+    return points
+
+
+def secondary_motion_report(armature, meshes: dict) -> str:
+    """The chains, leaf lengths and fitted capsules that data/secondary_motion.tres is written from."""
+    lines = []
+    for family, (prefixes, joint_radius, colliders) in SPRING_FAMILIES.items():
+        chains = spring_chains(armature, prefixes)
+        lengths = [round(armature.data.bones[end].length, 4) for _, end in chains]
+        lines.append(f"chain {family} radius {joint_radius} colliders {list(colliders)}")
+        lines.append(f"  roots {[root for root, _ in chains]}")
+        lines.append(f"  ends {[end for _, end in chains]}")
+        lines.append(f"  end lengths {lengths}")
+    for bone_name, (radius, height, center) in fit_colliders(armature, meshes).items():
+        lines.append(f"collider {bone_name} radius {radius:.4f} height {height:.4f} "
+                     f"offset ({center.x:.4f}, {center.y:.4f}, {center.z:.4f})")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------------------------------
