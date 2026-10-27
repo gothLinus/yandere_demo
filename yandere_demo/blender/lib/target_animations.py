@@ -234,8 +234,9 @@ def godot_prop_placements(skeleton) -> str:
     lines = []
     for prop, placement in prop_placements(skeleton).items():
         columns = [placement.col[index].xyz for index in range(3)]
-        vectors = ", ".join("Vector3(%s)" % ", ".join(f"{value:.4f}" for value in column) for column in columns)
-        origin = ", ".join(f"{value:.4f}" for value in placement.translation)
+        vectors = ", ".join("Vector3(%s)" % ", ".join(f"{round(value, 4) + 0.0:.4f}" for value in column)
+                            for column in columns)
+        origin = ", ".join(f"{round(value, 4) + 0.0:.4f}" for value in placement.translation)
         lines.append(f"\t{prop.upper()}: Transform3D(Basis({vectors}),\n\t\t\tVector3({origin})),")
     return "\n".join(lines)
 
@@ -286,7 +287,8 @@ def wrap_curls(skeleton, side: str, prop: str) -> dict:
     """Per-finger curls that lay each finger round the prop: index..pinky -> (knuckle, middle, end joint) degrees.
     Each finger takes the bend at its knuckle and the even bend of its two outer joints that lay its outer segments
     closest to the surface (least squares), without any of them sinking into it."""
-    hand_to_prop = GRIPS[prop][side] @ palm_local(skeleton, side).inverted() @ bone_matrix(skeleton, f"hand{side}").inverted()
+    hand_to_palm = palm_local(skeleton, side).inverted() @ bone_matrix(skeleton, f"hand{side}").inverted()
+    hand_to_prop = GRIPS[prop][side] @ hand_to_palm
     curls = {}
     for finger in FINGERS:
         chain = [f"{finger}_0{index}{side}" for index in (1, 2, 3)]
@@ -479,7 +481,8 @@ def clip_walk(rig: CharacterRig, frame: float, cycle: WalkCycle) -> BodySpec:
         arm.swing = swing
         arm.elbow = 16.0 + 9.0 * max(0.0, swing) / 16.0 + 3.0 * math.cos(2.0 * math.pi * (side_phase - 0.14))
         # The hand trails the forearm's swing and flips over at each end of it.
-        arm.hand = (8.0 * math.cos(2.0 * math.pi * (side_phase - 0.16)), -10.0, 3.0 * math.sin(2.0 * math.pi * (side_phase - 0.2)))
+        arm.hand = (8.0 * math.cos(2.0 * math.pi * (side_phase - 0.16)), -10.0,
+                    3.0 * math.sin(2.0 * math.pi * (side_phase - 0.2)))
         graceful_hand(arm, side_phase - 0.2, 3.0)
         arm.shoulder = (0.0, -2.0 + 1.5 * bob, 2.0 * math.cos(2.0 * math.pi * (side_phase - 0.05)))
     spec.skirt_sway = -2.5 * math.cos(2.0 * math.pi * (phase - 0.12))
@@ -517,7 +520,8 @@ def clip_notice_player(rig: CharacterRig, frame: float, curves: dict) -> BodySpe
         spec.arms[side].shoulder = add_degrees(spec.arms[side].shoulder, (0.0, value["shoulders"], 0.0))
     hand = value["hand"]
     right = spec.arms[".R"]
-    right.wrist = rig.idle_wrists[".R"].lerp(NOTICE_HAND_AT_CHEST, hand) + Vector((0.0, -0.025, 0.0)) * math.sin(math.pi * hand)
+    arc = Vector((0.0, -0.025, 0.0)) * math.sin(math.pi * hand)
+    right.wrist = rig.idle_wrists[".R"].lerp(NOTICE_HAND_AT_CHEST, hand) + arc
     right.pole = rig.idle_poles[".R"].lerp(Vector((-0.6, 0.6, -0.5)), hand)
     right.aim = ((0.2, -0.3, 0.9), (0.3, 0.9, 0.0))
     right.aim_weight = hand
@@ -550,7 +554,8 @@ def startled_curves(rig: CharacterRig) -> dict:
         idle_wrist = rig.idle_wrists[side]
         lift = idle_wrist.lerp(target, 0.6) + Vector((0.0, -0.08, 0.0))
         curves[f"wrist{side}"] = Curve([(0, idle_wrist), (2, idle_wrist + Vector((0.0, 0.0, -0.01))), (4, lift), (6, target),
-                                        (10, target + Vector((0.0, 0.008, -0.012))), (14, target + Vector((0.0, -0.003, 0.004))),
+                                        (10, target + Vector((0.0, 0.008, -0.012))),
+                                        (14, target + Vector((0.0, -0.003, 0.004))),
                                         (20, target)])
         idle_pole = rig.idle_poles[side]
         tucked = Vector((side_sign(side) * 0.5, 0.6, -0.6))
@@ -923,7 +928,8 @@ def clip_sweep(rig: CharacterRig, frame: float, broom_curls: dict) -> BodySpec:
     spec.neck = (6.0, 0.0, -4.0 * stroke)
     spec.head = (8.0, -2.0, -5.0 * math.sin(2.0 * math.pi * (phase - 0.1)))
     pose = compose(rig, spec)
-    grip_on_axis = to_world(rig, pose, SWEEP_TOP_HAND + Vector((0.05 * stroke, 0.015 * math.cos(2.0 * math.pi * phase), 0.0)))
+    top_hand = SWEEP_TOP_HAND + Vector((0.05 * stroke, 0.015 * math.cos(2.0 * math.pi * phase), 0.0))
+    grip_on_axis = to_world(rig, pose, top_hand)
     reach = BROOM_HANDLE_LENGTH + BROOM_HEAD_HEIGHT * 0.5 - BROOM_TOP_GRIP
     azimuth = math.radians(SWEEP_AZIMUTH + SWEEP_ARC * math.sin(2.0 * math.pi * (phase - 0.08)))
     across = math.sqrt(max(0.0, reach * reach - grip_on_axis.z * grip_on_axis.z))
@@ -956,7 +962,8 @@ def clip_wave(rig: CharacterRig, frame: float) -> BodySpec:
     spec.spine = add_degrees(spec.spine, (2.0, 2.0, 2.0))
     spec.chest = add_degrees(spec.chest, (1.5, 2.5 + 0.8 * trail, 3.0))
     spec.neck = add_degrees(spec.neck, (0.0, -1.0 - 0.8 * trail, 1.0))
-    spec.head = add_degrees(spec.head, (-1.0 + 1.0 * bounce, -5.0 - 2.0 * math.sin(2.0 * math.pi * (3.0 * phase - 0.18)), 3.0))
+    head_tilt = -5.0 - 2.0 * math.sin(2.0 * math.pi * (3.0 * phase - 0.18))
+    spec.head = add_degrees(spec.head, (-1.0 + 1.0 * bounce, head_tilt, 3.0))
     right = spec.arms[".R"]
     skeleton = rig.skeleton
     pose = compose(rig, spec)
@@ -1034,7 +1041,8 @@ def clip_idle_playful(rig: CharacterRig, frame: float) -> BodySpec:
     spec.hips_offset = Vector((0.020 + 0.004 * sway, 0.006, -0.018 - 0.008 * bounce))
     spec.hips = (0.0, 6.0, 3.0 + 2.0 * sway)
     spec.spine = (-1.0, -3.0, -2.0)
-    spec.chest = (-2.0, -2.0 + 0.8 * math.sin(2.0 * math.pi * (phase - 0.06)), -2.0 * math.sin(2.0 * math.pi * (phase - 0.06)))
+    late_sway = math.sin(2.0 * math.pi * (phase - 0.06))
+    spec.chest = (-2.0, -2.0 + 0.8 * late_sway, -2.0 * late_sway)
     spec.neck = (0.0, -3.0, 2.0)
     # The head rides the bounce a beat late and swings its tilt against the hips.
     late_bounce = 0.5 - 0.5 * math.cos(2.0 * math.pi * 3.0 * (phase - 0.04))
@@ -1097,7 +1105,6 @@ def target_clips(rig: CharacterRig, braid: BraidLayout, braid_resting: animation
     stand_up = stand_up_curves(rig)
     can_curls = wrap_curls(rig.skeleton, ".R", "can")
     broom_curls = {side: wrap_curls(rig.skeleton, side, "broom") for side in SIDES}
-    print(f"wrapping curls: can {can_curls}, broom {broom_curls}")
     clips = [
         ("target_idle", 90, True, lambda frame: clip_idle(rig, frame)),
         ("target_walk_routine", WALK.frame_count, True, lambda frame: clip_walk(rig, frame, walk)),

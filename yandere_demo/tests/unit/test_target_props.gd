@@ -50,14 +50,14 @@ func test_every_prop_is_held_by_its_clip() -> void:
 		for sample: int in SAMPLE_COUNT:
 			var time: float = animation.length * sample / SAMPLE_COUNT
 			_pose(skeleton, animation, time)
-			var hand: Transform3D = skeleton.get_bone_global_pose(skeleton.find_bone(hand_bone))
+			var hand: Transform3D = _global_pose(skeleton, skeleton.find_bone(hand_bone))
 			var palm: Array[Vector3] = _palm(skeleton, hand_bone)
 			worst_palm = maxf(worst_palm, _palm_gap(prop, hand, palm))
 			worst_tilt = maxf(worst_tilt, _palm_tilt(prop, hand, palm))
 			if grip[1]:
 				for joint: String in WRAPPING_JOINTS:
-					var joint_point: Vector3 = skeleton.get_bone_global_pose(
-							skeleton.find_bone(joint + hand_bone.right(2))).origin
+					var joint_bone: int = skeleton.find_bone(joint + hand_bone.right(2))
+					var joint_point: Vector3 = _global_pose(skeleton, joint_bone).origin
 					worst_finger = maxf(worst_finger, absf(_prop_distance(prop, hand, joint_point)))
 			if grip[2] != "" and (sample == 0 or sample == SAMPLE_COUNT / 2):
 				worst_support = maxf(worst_support, _palm_gap(prop, hand, _palm(skeleton, grip[2])))
@@ -71,6 +71,17 @@ func test_every_prop_is_held_by_its_clip() -> void:
 				% [animation_name, prop_name, worst_support, grip[2], PALM_CONTACT_TOLERANCE])
 		prop.free()
 	root.free()
+
+
+## A bone's pose in skeleton space, composed from the local poses: outside the scene tree Skeleton3D's own global-pose
+## cache is never refreshed after the first evaluation.
+func _global_pose(skeleton: Skeleton3D, bone: int) -> Transform3D:
+	var pose: Transform3D = skeleton.get_bone_pose(bone)
+	var parent: int = skeleton.get_bone_parent(bone)
+	while parent >= 0:
+		pose = skeleton.get_bone_pose(parent) * pose
+		parent = skeleton.get_bone_parent(parent)
+	return pose
 
 
 ## Applies an animation's bone tracks at `time` to the skeleton (no AnimationPlayer processing needed).
@@ -94,12 +105,12 @@ func _pose(skeleton: Skeleton3D, animation: Animation, time: float) -> void:
 func _palm(skeleton: Skeleton3D, hand_bone: String) -> Array[Vector3]:
 	var side: String = hand_bone.right(2)
 	var hand_index: int = skeleton.find_bone(hand_bone)
-	var hand: Transform3D = skeleton.get_bone_global_pose(hand_index)
+	var hand: Transform3D = _global_pose(skeleton, hand_index)
 	var knuckles: Vector3 = Vector3.ZERO
 	var rest_knuckles: Vector3 = Vector3.ZERO
 	for knuckle: String in KNUCKLES:
 		var bone: int = skeleton.find_bone(knuckle + side)
-		knuckles += skeleton.get_bone_global_pose(bone).origin / KNUCKLES.size()
+		knuckles += _global_pose(skeleton, bone).origin / KNUCKLES.size()
 		rest_knuckles += skeleton.get_bone_global_rest(bone).origin / KNUCKLES.size()
 	var rest: Transform3D = skeleton.get_bone_global_rest(hand_index)
 	var along: Vector3 = (rest_knuckles - rest.origin).normalized()

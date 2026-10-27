@@ -1,8 +1,8 @@
 class_name TargetProps
 extends Node
 ## Hand props (ruling R9): simple toon meshes on the hands, each visible only while the clip that holds it plays.
-## Placements are in the hand bone's space, fitted to each clip's mid pose: the book and phone sit between both hands
-## facing the eyes, the can points at the mouth, and the broom shaft runs through both hands to the floor.
+## Placements are in the hand bone's space: the open book lies against both palms, the phone in the right palm, the
+## can in a wrapped grip, and the broom shaft runs through both fists to the floor.
 
 const BOOK: StringName = &"book"
 const PHONE: StringName = &"phone"
@@ -18,17 +18,22 @@ const PROP_FOR_ANIMATION: Dictionary[StringName, StringName] = {
 const PROP_BONES: Dictionary[StringName, StringName] = {
 	BOOK: &"hand.R", PHONE: &"hand.R", CAN: &"hand.R", BROOM: &"hand.L",
 }
+## Printed by blender/build_target.py from the grips in lib/target_animations.py (a hand bone's frame is the same in
+## Blender and Godot); each clip poses the hands from the prop, so the prop lies in the palm with the fingers round it.
 const PROP_PLACEMENTS: Dictionary[StringName, Transform3D] = {
-	BOOK: Transform3D(Basis(Vector3(-0.969, -0.243, -0.037), Vector3(-0.209, 0.737, 0.643), Vector3(-0.129, 0.631, -0.765)),
-			Vector3(0.055, 0.127, 0.019)),
-	PHONE: Transform3D(Basis(Vector3(-0.947, 0.018, -0.319), Vector3(-0.202, 0.740, 0.642), Vector3(0.248, 0.673, -0.697)),
-			Vector3(0.023, 0.057, 0.01)),
-	CAN: Transform3D(Basis(Vector3(-0.698, -0.395, 0.597), Vector3(-0.662, 0.041, -0.748), Vector3(0.271, -0.918, -0.29)),
-			Vector3(0.04, 0.05, 0.0)),
-	BROOM: Transform3D(Basis(Vector3(-0.364, -0.888, 0.282), Vector3(0.858, -0.438, -0.268), Vector3(0.361, 0.144, 0.921)),
-			Vector3(0.129, -0.016, -0.04)),
+	BOOK: Transform3D(Basis(Vector3(-0.5786, 0.3900, -0.7163), Vector3(0.1741, 0.9171, 0.3587), Vector3(0.7968, 0.0829, -0.5985)),
+			Vector3(0.0697, 0.0414, 0.0909)),
+	PHONE: Transform3D(Basis(Vector3(-0.4163, -0.3011, -0.8579), Vector3(-0.1315, 0.9536, -0.2709), Vector3(0.8997, 0.0000, -0.4365)),
+			Vector3(0.0178, 0.0580, -0.0126)),
+	CAN: Transform3D(Basis(Vector3(0.0000, -1.0000, 0.0000), Vector3(-0.4365, 0.0000, -0.8997), Vector3(0.8997, 0.0000, -0.4365)),
+			Vector3(0.0447, 0.0586, -0.0172)),
+	BROOM: Transform3D(Basis(Vector3(0.0000, 1.0000, 0.0000), Vector3(0.4365, 0.0000, -0.8997), Vector3(-0.8997, 0.0000, -0.4365)),
+			Vector3(0.0394, 0.0466, -0.1476)),
 }
-const BOOK_SIZE: Vector3 = Vector3(0.15, 0.21, 0.025)
+## The open book: two leaves, each turned BOOK_OPEN_DEGREES toward the reader (+Z) about the spine (Y).
+const BOOK_LEAF_SIZE: Vector3 = Vector3(0.14, 0.2, 0.012)
+const BOOK_OPEN_DEGREES: float = 12.0
+const BOOK_COVER_DEPTH: float = 0.004
 const BOOK_COLOR: Color = Color(0.22, 0.32, 0.62)
 const PAGES_COLOR: Color = Color(0.95, 0.93, 0.86)
 const PHONE_SIZE: Vector3 = Vector3(0.07, 0.14, 0.009)
@@ -38,7 +43,7 @@ const CAN_RADIUS: float = 0.033
 const CAN_HEIGHT: float = 0.12
 const CAN_COLOR: Color = Color(1.0, 0.7, 0.78)
 const BROOM_HANDLE_RADIUS: float = 0.012
-const BROOM_HANDLE_LENGTH: float = 1.08
+const BROOM_HANDLE_LENGTH: float = 1.25
 const BROOM_HEAD_SIZE: Vector3 = Vector3(0.28, 0.12, 0.05)
 const BROOM_HANDLE_COLOR: Color = Color(0.55, 0.38, 0.22)
 const BROOM_HEAD_COLOR: Color = Color(0.82, 0.68, 0.36)
@@ -91,9 +96,16 @@ func show_for(animation_name: StringName) -> void:
 
 static func _make_book() -> Node3D:
 	var book: Node3D = Node3D.new()
-	book.add_child(_box(BOOK_SIZE, BOOK_COLOR, Vector3.ZERO))
-	var pages: Vector3 = BOOK_SIZE - Vector3(PAGE_INSET, PAGE_INSET, -PAGE_INSET)
-	book.add_child(_box(pages, PAGES_COLOR, Vector3(PAGE_INSET * 0.5, 0.0, 0.0)))
+	for side: float in [1.0, -1.0]:
+		var leaf: Node3D = Node3D.new()
+		leaf.basis = Basis(Vector3.UP, deg_to_rad(-side * BOOK_OPEN_DEGREES))
+		leaf.position = leaf.basis.x * side * BOOK_LEAF_SIZE.x * 0.5
+		var cover: Vector3 = Vector3(BOOK_LEAF_SIZE.x, BOOK_LEAF_SIZE.y, BOOK_COVER_DEPTH)
+		leaf.add_child(_box(cover, BOOK_COLOR, Vector3(0.0, 0.0, (BOOK_COVER_DEPTH - BOOK_LEAF_SIZE.z) * 0.5)))
+		var pages: Vector3 = Vector3(BOOK_LEAF_SIZE.x - PAGE_INSET, BOOK_LEAF_SIZE.y - PAGE_INSET,
+				BOOK_LEAF_SIZE.z - BOOK_COVER_DEPTH)
+		leaf.add_child(_box(pages, PAGES_COLOR, Vector3(side * -PAGE_INSET * 0.5, 0.0, BOOK_COVER_DEPTH * 0.5)))
+		book.add_child(leaf)
 	return book
 
 
